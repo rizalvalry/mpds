@@ -1,0 +1,31 @@
+# EAS Ignore File
+# Exclude unnecessary files from EAS Build upload
+
+# Node modules
+node_modules/
+
+# Build folders
+.expo/
+.expo-shared/
+dist/
+build/
+
+# Cache
+.cache/
+.temp/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Git
+.git/
+
+# Temporary files
+*.tmp
+*.temp

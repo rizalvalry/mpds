@@ -1,0 +1,1 @@
+export const MOCK_RESULT=[{id:121, uri:"#", analysis:{label:"dirty",confidence:"clean"}}]

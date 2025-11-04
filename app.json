@@ -1,29 +1,44 @@
 {
   "expo": {
-    "name": "frontend.appdrone-expo",
-    "slug": "frontend.appdrone-expo",
+    "name": "Motor Pool Drone Systems",
+    "slug": "motor-pool-drone-systems",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "orientation": "landscape",
+    "icon": "./assets/icon-apps.jpg",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "image": "./assets/droneai.jpg",
+      "resizeMode": "cover",
+      "backgroundColor": "#0047AB"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.myapp"
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/icon-apps.jpg",
+        "backgroundColor": "#0047AB"
       },
+      "package": "com.bsi.dronefrontend",
+      "versionCode": 1,
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES"
+      ],
       "edgeToEdgeEnabled": true
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "1b1768a8-d203-40e9-943f-b036bbe1d85c"
+      }
+    },
+    "owner": "rizalvalry"
   }
 }
