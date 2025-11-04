@@ -182,25 +182,22 @@ export default function MonitoringMockup({ session, setActiveMenu }) {
         backgroundColor: '#FFFFFF',
         paddingHorizontal: 16,
         paddingVertical: 12,
-        flexDirection: 'row',
-        gap: 12,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 4,
         elevation: 3,
       }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
         <TouchableOpacity
           onPress={() => setActiveMenu('dashboard')}
           style={{
-            flex: 1,
             paddingVertical: 12,
             paddingHorizontal: 16,
             borderRadius: 8,
             backgroundColor: 'transparent',
             flexDirection: 'row',
             alignItems: 'center',
-            justifyContent: 'center',
             gap: 8,
           }}
         >
@@ -211,14 +208,12 @@ export default function MonitoringMockup({ session, setActiveMenu }) {
         <TouchableOpacity
           onPress={() => setActiveMenu('upload')}
           style={{
-            flex: 1,
             paddingVertical: 12,
             paddingHorizontal: 16,
             borderRadius: 8,
             backgroundColor: 'transparent',
             flexDirection: 'row',
             alignItems: 'center',
-            justifyContent: 'center',
             gap: 8,
           }}
         >
@@ -229,14 +224,12 @@ export default function MonitoringMockup({ session, setActiveMenu }) {
         <TouchableOpacity
           onPress={() => setActiveMenu('cases')}
           style={{
-            flex: 1,
             paddingVertical: 12,
             paddingHorizontal: 16,
             borderRadius: 8,
             backgroundColor: 'transparent',
             flexDirection: 'row',
             alignItems: 'center',
-            justifyContent: 'center',
             gap: 8,
           }}
         >
@@ -245,14 +238,12 @@ export default function MonitoringMockup({ session, setActiveMenu }) {
         </TouchableOpacity>
 
         <View style={{
-          flex: 1,
           paddingVertical: 12,
           paddingHorizontal: 16,
           borderRadius: 8,
           backgroundColor: '#0EA5E9',
           flexDirection: 'row',
           alignItems: 'center',
-          justifyContent: 'center',
           gap: 8,
           shadowColor: '#0EA5E9',
           shadowOffset: { width: 0, height: 4 },
@@ -263,6 +254,23 @@ export default function MonitoringMockup({ session, setActiveMenu }) {
           <Text style={{ fontSize: 18 }}>📹</Text>
           <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFFFFF' }}>Monitoring</Text>
         </View>
+
+        <TouchableOpacity
+          onPress={() => setActiveMenu('documentations')}
+          style={{
+            paddingVertical: 12,
+            paddingHorizontal: 16,
+            borderRadius: 8,
+            backgroundColor: 'transparent',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <Text style={{ fontSize: 18 }}>📚</Text>
+          <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Documentations</Text>
+        </TouchableOpacity>
+        </ScrollView>
       </View>
 
       {/* Content */}

@@ -20,7 +20,8 @@ import UploadScreen from './UploadScreen';
 import CasesScreen from './CasesScreen';
 import MonitoringScreen from './MonitoringScreen';
 import UploadMockup from './UploadMockup';
-import MonitoringMockup from './MonitoringMockup';
+MonitoringMockup from './MonitoringMockup';
+import DocumentationsScreen from './DocumentationsScreen';
 import CasesMockup from './CasesMockup';
 import DashboardComplete from './DashboardComplete';
 
@@ -37,7 +38,7 @@ export default function DashboardScreen({ session, setSession }) {
   const [dashboardBdPerBlock, setDashboardBdPerBlock] = useState([]);
   const [selectedFilter, setSelectedFilter] = useState('today'); // today, week, month
   const [isLandscape, setIsLandscape] = useState(false);
-  const [activeMenu, setActiveMenu] = useState('dashboard'); // dashboard, upload, cases, monitoring
+  const [activeMenu, setActiveMenu] = useState('dashboard'); // dashboard, upload, cases, monitoring, documentations
   const [scrollY] = useState(new Animated.Value(0));
   const [bottomBarVisible, setBottomBarVisible] = useState(true);
   const [bottomBarHeight] = useState(new Animated.Value(0));
@@ -233,6 +234,11 @@ export default function DashboardScreen({ session, setSession }) {
   // Render Monitoring Screen - FULL MOCKUP (PERSIS seperti monitoring-menu.png)
   if (activeMenu === 'monitoring') {
     return <MonitoringMockup session={session} setActiveMenu={setActiveMenu} />;
+  }
+
+  // Render Documentations Screen - WebView
+  if (activeMenu === 'documentations') {
+    return <DocumentationsScreen />;
   }
 
   // Render Dashboard - Enhanced Dashboard dengan Charts (mengikuti Flutter)
