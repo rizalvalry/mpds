@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -54,29 +54,14 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showValidationDialog, setShowValidationDialog] = useState(false);
 
-  // FIX: Tambahkan ref untuk track mounted status dan loading state
-  const isMountedRef = useRef(true);
-  const isLoadingRef = useRef(false);
-  const abortControllerRef = useRef(null);
-
-  // FIX: Cleanup saat component unmount
   useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      // Cancel ongoing requests
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
+    loadInitialData();
   }, []);
 
-  // FIX: Update time every second dengan cleanup
+  // Update time every second
   useEffect(() => {
     const timer = setInterval(() => {
-      if (isMountedRef.current) {
-        setCurrentTime(new Date());
-      }
+      setCurrentTime(new Date());
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -88,30 +73,59 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
     card: isDarkMode ? 'rgba(30, 144, 255, 0.1)' : 'rgba(255, 255, 255, 0.8)',
   };
 
-  // FIX: loadCases dengan useCallback dan mounted check
-  const loadCases = useCallback(async (page = 1, isRefresh = false) => {
-    // Prevent multiple overlapping calls
-    if (isLoadingRef.current && isRefresh) {
-      console.log('[Cases] Already loading, skipping duplicate call');
-      return;
-    }
-
+  const loadInitialData = async () => {
+    setLoading(true);
     try {
-      isLoadingRef.current = true;
+      await Promise.all([
+        loadCases(1, true),
+        loadWorkers(),
+        loadAreas(),
+      ]);
+    } catch (error) {
+      console.error('[Cases] Error loading initial data:', error);
+
+      // Check if error is session expired/invalid
+      if (error.message === 'SESSION_EXPIRED' || error.message === 'SESSION_INVALID') {
+        Alert.alert(
+          'Session Expired',
+          'Your session has expired. Please login again.',
+          [
+            {
+              text: 'OK',
+              onPress: () => setSession(null), // Trigger logout
+            },
+          ]
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadCases = async (page = 1, isRefresh = false) => {
+    try {
+      console.log('[Cases] Loading cases - page:', page, 'refresh:', isRefresh, 'area:', selectedArea?.code || 'all');
+
       const response = await apiService.getCaseList({
         pageSize,
         page,
         filterAreaCode: selectedArea?.code || null,
       });
 
-      // Check if component is still mounted before updating state
-      if (!isMountedRef.current) {
-        console.log('[Cases] Component unmounted, skipping state update');
-        return;
-      }
+      console.log('[Cases] Response received - success:', response.success, 'data length:', response.data?.length || 0);
 
       if (response.success && response.data) {
         const newCases = response.data;
+
+        console.log('[Cases] Cases loaded successfully:', newCases.length, 'items');
+
+        if (newCases.length === 0) {
+          console.warn('[Cases] ⚠️ No cases returned from API. This could mean:');
+          console.warn('[Cases] 1. User has no permission to view cases');
+          console.warn('[Cases] 2. Area filter is too restrictive');
+          console.warn('[Cases] 3. No cases exist in the database');
+          console.warn('[Cases] 4. Auth token is invalid/expired');
+        }
 
         if (isRefresh) {
           setCases(newCases);
@@ -124,34 +138,21 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
         if (!isRefresh) {
           setCurrentPage(page);
         }
+      } else {
+        console.error('[Cases] API returned error:', response.message);
+        Alert.alert('Error', response.message || 'Failed to load cases');
       }
     } catch (error) {
-      // Check if component is still mounted before handling error
-      if (!isMountedRef.current) {
-        console.log('[Cases] Component unmounted, skipping error handling');
-        return;
-      }
-      
-      // Don't throw error if it's a session expired - let loadInitialData handle it
-      if (error.message !== 'SESSION_EXPIRED' && error.message !== 'SESSION_INVALID') {
-        console.error('[Cases] Error loading cases:', error);
-      }
+      console.error('[Cases] Error loading cases:', error);
+      Alert.alert('Error', 'Failed to load cases: ' + (error.message || 'Unknown error'));
       throw error;
-    } finally {
-      isLoadingRef.current = false;
     }
-  }, [selectedArea, pageSize]);
+  };
 
-  // FIX: loadWorkers dengan mounted check
-  const loadWorkers = useCallback(async () => {
+  const loadWorkers = async () => {
     try {
       const response = await apiService.getWorkers();
       console.log('[Cases] Workers response:', response);
-
-      // Check if component is still mounted
-      if (!isMountedRef.current) {
-        return;
-      }
 
       if (response.success && response.data) {
         setWorkers(response.data);
@@ -161,144 +162,42 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
       }
     } catch (error) {
       console.error('[Cases] Error loading workers:', error);
-      // Set empty array to prevent crash, but only if mounted
-      if (isMountedRef.current) {
-        setWorkers([]);
-      }
+      // Set empty array to prevent crash
+      setWorkers([]);
     }
-  }, []);
+  };
 
-  // FIX: loadAreas dengan mounted check
-  const loadAreas = useCallback(async () => {
+  const loadAreas = async () => {
     try {
       const response = await apiService.getAreas();
-      
-      // Check if component is still mounted
-      if (!isMountedRef.current) {
-        return;
-      }
-
       if (response.success && response.data) {
         setAreas(response.data);
       }
     } catch (error) {
       console.error('[Cases] Error loading areas:', error);
-      // Set empty array only if mounted
-      if (isMountedRef.current) {
-        setAreas([]);
-      }
+      setAreas([]);
     }
-  }, []);
+  };
 
-  // FIX: loadInitialData dengan mounted check dan prevent duplicate calls
-  const loadInitialData = useCallback(async () => {
-    // Prevent multiple simultaneous calls
-    if (isLoadingRef.current) {
-      console.log('[Cases] Initial data already loading, skipping');
-      return;
-    }
-
-    if (!isMountedRef.current) {
-      return;
-    }
-
-    isLoadingRef.current = true;
-    if (isMountedRef.current) {
-      setLoading(true);
-    }
-
-    try {
-      const results = await Promise.allSettled([
-        loadCases(1, true),
-        loadWorkers(),
-        loadAreas(),
-      ]);
-
-      // Check if component is still mounted before processing results
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      const rejected = results.filter(r => r.status === 'rejected');
-      if (rejected.length > 0) {
-        const sessionError = rejected.find(r =>
-          r.reason && (r.reason.message === 'SESSION_EXPIRED' || r.reason.message === 'SESSION_INVALID')
-        );
-        if (sessionError) {
-          Alert.alert(
-            'Session Expired',
-            'Your session has expired. Please login again.',
-            [
-              {
-                text: 'OK',
-                onPress: () => {
-                  if (isMountedRef.current) {
-                    setSession(null);
-                  }
-                },
-              },
-            ]
-          );
-        } else {
-          console.warn('[Cases] Some resources failed to load, continuing with partial data');
-        }
-      }
-    } catch (error) {
-      if (isMountedRef.current) {
-        console.error('[Cases] Unexpected error loading initial data:', error);
-      }
-    } finally {
-      isLoadingRef.current = false;
-      if (isMountedRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [loadCases, loadWorkers, loadAreas, setSession]);
-
-  // FIX: useEffect untuk loadInitialData - hanya dipanggil sekali saat mount
-  useEffect(() => {
-    // Load initial data hanya sekali saat component mount
-    loadInitialData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array - hanya run sekali saat mount
-
-  // FIX: onRefresh dengan useCallback dan proper dependencies
   const onRefresh = useCallback(async () => {
-    // Prevent multiple simultaneous refresh calls
-    if (refreshing || isLoadingRef.current) {
-      console.log('[Cases] Already refreshing, skipping duplicate refresh');
-      return;
-    }
-
-    if (!isMountedRef.current) {
-      return;
-    }
-
     setRefreshing(true);
     try {
       await loadCases(1, true);
     } finally {
-      if (isMountedRef.current) {
-        setRefreshing(false);
-      }
+      setRefreshing(false);
     }
-  }, [loadCases, refreshing]);
+  }, [selectedArea]);
 
-  // FIX: loadMore dengan mounted check
-  const loadMore = useCallback(async () => {
-    if (loadingMore || !hasMoreData || !isMountedRef.current || isLoadingRef.current) {
-      return;
-    }
+  const loadMore = async () => {
+    if (loadingMore || !hasMoreData) return;
 
     setLoadingMore(true);
     try {
       await loadCases(currentPage + 1, false);
     } finally {
-      if (isMountedRef.current) {
-        setLoadingMore(false);
-      }
+      setLoadingMore(false);
     }
-  }, [loadCases, currentPage, loadingMore, hasMoreData]);
+  };
 
   const handleAssignWorker = async (workerId) => {
     if (!selectedCase) return;
@@ -403,31 +302,21 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
     }
   };
 
-  // FIX: applyFilter dengan mounted check
-  const applyFilter = useCallback((area) => {
-    if (!isMountedRef.current) {
-      return;
-    }
+  const applyFilter = (area) => {
     setSelectedArea(area);
     setShowFilterModal(false);
     setCurrentPage(1);
     setHasMoreData(true);
-    // loadCases akan dipanggil otomatis karena selectedArea berubah
     loadCases(1, true);
-  }, [loadCases]);
+  };
 
-  // FIX: resetFilter dengan mounted check
-  const resetFilter = useCallback(() => {
-    if (!isMountedRef.current) {
-      return;
-    }
+  const resetFilter = () => {
     setSelectedArea(null);
     setShowFilterModal(false);
     setCurrentPage(1);
     setHasMoreData(true);
-    // loadCases akan dipanggil otomatis karena selectedArea berubah
     loadCases(1, true);
-  }, [loadCases]);
+  };
 
   const getStatusColor = (statusName) => {
     switch (statusName?.toLowerCase()) {

@@ -105,24 +105,25 @@ export class ApiService {
         data = JSON.parse(responseText);
       } catch (jsonError) {
         console.error('[API] JSON Parse Error:', jsonError);
-        console.error('[API] Response text:', responseText.substring(0, 200));
+        console.error('[API] Response status:', response.status);
+        console.error('[API] Response text (first 500 chars):', responseText.substring(0, 500));
 
-        // 非JSON応答（HTML等）はセッションを即時削除せず、安全に失敗として返す
-        // ここではthrowしないことで、画面側で部分失敗を許容できる
+        // Non-JSON response (HTML, plain text, etc.)
         const lowerText = responseText.toLowerCase();
         const looksLikeHtml = responseText.includes('<html') || responseText.includes('<!DOCTYPE');
         const hintsSessionMessage = (lowerText.includes('invalid') && lowerText.includes('session')) ||
                                      (lowerText.includes('expired') && lowerText.includes('session')) ||
                                      lowerText.includes('unauthorized');
 
-        // レスポンス本文にそれらしい文言があっても、ここではセッションクリアはしない
-        // 本当にセッション失効の場合はサーバが419/401を返し、下の処理で対応される
+        // Return formatted error response
         return {
           success: false,
           status_code: response.status,
-          message: looksLikeHtml || hintsSessionMessage
-            ? 'Non-JSON response received'
-            : (responseText || 'Invalid response from server'),
+          message: looksLikeHtml
+            ? 'Server returned HTML instead of JSON. Please check your connection and endpoint configuration.'
+            : hintsSessionMessage
+            ? 'Session invalid or expired. Please login again.'
+            : (responseText.length > 200 ? `${responseText.substring(0, 200)}...` : responseText) || 'Invalid response from server',
           data: null,
         };
       }
@@ -425,7 +426,17 @@ export class ApiService {
     }
 
     const url = this.buildUrl(this.endpoints.caseList, query);
-    return this.fetchData({ method: 'GET', url });
+    console.log('[API] getCaseList - Sending request to:', url);
+    console.log('[API] getCaseList - Has auth token:', !!this.accessToken);
+    console.log('[API] getCaseList - Filter areaCode:', filterAreaCode || 'none');
+
+    const response = await this.fetchData({ method: 'GET', url });
+
+    console.log('[API] getCaseList - Response success:', response.success);
+    console.log('[API] getCaseList - Data count:', response.data?.length || 0);
+    console.log('[API] getCaseList - Pagination:', response.pagination);
+
+    return response;
   }
 
   async assignWorker(caseId, assignTo) {
