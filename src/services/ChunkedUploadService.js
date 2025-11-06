@@ -25,12 +25,14 @@ function generateUUID() {
 export class ChunkedUploadService {
   constructor(useProd = true) {
     this.baseUrl = useProd ? PROD_BASE_URL : DEV_BASE_URL;
+    this.useProd = useProd;
+
     // CORRECT URL based on Azure Ingress configuration
-    // Development: /drone/upload/api/v1/upload/chunk (rewritten to /api/v1/upload/chunk by ingress)
-    // Production: /services/upload/api/v1/upload/chunk (rewritten to /api/v1/upload/chunk by ingress)
+    // Production: Use chunked upload endpoint
+    // Development: Use direct upload endpoint (no chunking)
     this.uploadUrl = useProd
       ? 'https://droneark.bsi.co.id/services/upload/api/v1/upload/chunk'
-      : 'https://rnd-dev.bsi.co.id/drone/upload/api/v1/upload/chunk';
+      : 'https://rnd-dev.bsi.co.id/drone/upload/api/v1/upload/file';
   }
 
   // Initialize - backend doesn't require authentication
@@ -150,16 +152,92 @@ export class ChunkedUploadService {
   }
 
   /**
+   * Direct upload for development (no chunking)
+   * Uses /upload/file endpoint which directly uploads to Azure Blob Storage
+   * @param {object} file - File object with uri, fileName, size, type
+   * @param {function} onProgress - Progress callback (0-100)
+   */
+  async uploadFileDirect(file, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      // Track upload progress
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable && onProgress) {
+          const percentComplete = Math.round((event.loaded / event.total) * 100);
+          onProgress(percentComplete);
+        }
+      });
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const response = xhr.responseText ? JSON.parse(xhr.responseText) : { success: true };
+            console.log(`[DirectUpload] ✅ File ${file.fileName} uploaded successfully`);
+            resolve(response);
+          } catch (error) {
+            console.log(`[DirectUpload] File ${file.fileName} uploaded (empty response)`);
+            resolve({ success: true });
+          }
+        } else {
+          console.error(`[DirectUpload] ❌ FAILED: ${xhr.status}`);
+          console.error(`[DirectUpload] Response: ${xhr.responseText}`);
+          reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
+        }
+      });
+
+      xhr.addEventListener('error', () => {
+        reject(new Error('Network error during upload'));
+      });
+
+      xhr.addEventListener('abort', () => {
+        reject(new Error('Upload aborted'));
+      });
+
+      // Create FormData for direct upload - only file required
+      const formData = new FormData();
+      formData.append('file', {
+        uri: file.uri,
+        type: file.type || 'image/jpeg',
+        name: file.fileName,
+      });
+
+      console.log(`[DirectUpload] ========================================`);
+      console.log(`[DirectUpload] Uploading file directly`);
+      console.log(`[DirectUpload] URL: ${this.uploadUrl}`);
+      console.log(`[DirectUpload] File: ${file.fileName}`);
+      console.log(`[DirectUpload] Size: ${file.size || 'unknown'} bytes`);
+      console.log(`[DirectUpload] ========================================`);
+
+      xhr.open('POST', this.uploadUrl);
+      xhr.send(formData);
+    });
+  }
+
+  /**
    * Upload single file as single chunk (Simplified for React Native)
    * React Native FormData natively handles file upload without manual chunking
    * @param {object} file - File object with uri, fileName, size, type
    * @param {function} onProgress - Progress callback (0-100)
-   * @param {string} uuid - UUID for organizing uploads (optional, required for development)
-   * @param {string} userid - User ID (optional, required for development)
+   * @param {string} uuid - UUID for organizing uploads (optional, required for production chunking)
+   * @param {string} userid - User ID (optional, required for production chunking)
    */
   async uploadFileChunked(file, onProgress, uuid = null, userid = null) {
     await this.init(); // Initialize
 
+    // Use direct upload for development, chunking for production
+    if (!this.useProd) {
+      console.log(`[ChunkUpload] Using direct upload for development environment`);
+      try {
+        const result = await this.uploadFileDirect(file, onProgress);
+        return { success: true, fileName: file.fileName, result };
+      } catch (error) {
+        console.error(`[DirectUpload] Error uploading file:`, error);
+        throw error;
+      }
+    }
+
+    // Production: Use chunking method
     // Generate unique file ID - use timestamp + random string
     // Backend uses this as filename for progress tracking ({file_id}.progress)
     const fileId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -170,7 +248,7 @@ export class ChunkedUploadService {
     const chunkIndex = 0;
 
     console.log(`[ChunkUpload] ========================================`);
-    console.log(`[ChunkUpload] Starting upload`);
+    console.log(`[ChunkUpload] Starting chunked upload (PRODUCTION)`);
     console.log(`[ChunkUpload] File: ${file.fileName}`);
     console.log(`[ChunkUpload] Size: ${file.size || 'unknown'} bytes`);
     console.log(`[ChunkUpload] File ID: ${fileId}`);
@@ -209,36 +287,43 @@ export class ChunkedUploadService {
    * @param {number} batchSize - Number of files to upload in parallel (default: 8 like Flutter)
    * @param {function} onBatchProgress - Batch progress callback
    * @param {function} onFileProgress - Per-file progress callback
-   * @param {string} uuid - UUID for organizing uploads (optional, will be auto-generated if not provided)
-   * @param {string} userid - User ID (optional, will be retrieved from session if not provided)
+   * @param {string} uuid - UUID for organizing uploads (only for production chunking)
+   * @param {string} userid - User ID (only for production chunking)
    */
   async uploadBatch(files, batchSize = 8, onBatchProgress, onFileProgress, uuid = null, userid = null) {
     const results = [];
     const batches = [];
 
-    // Auto-generate UUID if not provided
-    if (!uuid) {
-      uuid = generateUUID();
-      console.log(`[ChunkUpload] Generated UUID: ${uuid}`);
-    }
-
-    // Retrieve userid from session if not provided
-    if (!userid) {
-      try {
-        const loginResponse = await AsyncStorage.getItem('login_response');
-        if (loginResponse) {
-          const userData = JSON.parse(loginResponse);
-          userid = userData.user_id || userData.id;
-          console.log(`[ChunkUpload] Retrieved user_id from session: ${userid}`);
-        }
-      } catch (error) {
-        console.error('[ChunkUpload] Failed to retrieve user_id from session:', error);
+    // Only validate uuid/userid for production environment (chunking)
+    if (this.useProd) {
+      // Auto-generate UUID if not provided
+      if (!uuid) {
+        uuid = generateUUID();
+        console.log(`[ChunkUpload] Generated UUID: ${uuid}`);
       }
-    }
 
-    // Validate that we have uuid and userid
-    if (!uuid || !userid) {
-      throw new Error('UUID and userid are required for upload. Please ensure you are logged in.');
+      // Retrieve userid from session if not provided
+      if (!userid) {
+        try {
+          const loginResponse = await AsyncStorage.getItem('login_response');
+          if (loginResponse) {
+            const userData = JSON.parse(loginResponse);
+            userid = userData.user_id || userData.id;
+            console.log(`[ChunkUpload] Retrieved user_id from session: ${userid}`);
+          }
+        } catch (error) {
+          console.error('[ChunkUpload] Failed to retrieve user_id from session:', error);
+        }
+      }
+
+      // Validate that we have uuid and userid for production
+      if (!uuid || !userid) {
+        throw new Error('UUID and userid are required for production upload. Please ensure you are logged in.');
+      }
+
+      console.log(`[ChunkUpload] Production mode - UUID: ${uuid}, UserID: ${userid}`);
+    } else {
+      console.log(`[ChunkUpload] Development mode - Using direct upload (no uuid/userid required)`);
     }
 
     // Split files into batches
@@ -247,7 +332,6 @@ export class ChunkedUploadService {
     }
 
     console.log(`[ChunkUpload] Starting batch upload: ${files.length} files in ${batches.length} batches`);
-    console.log(`[ChunkUpload] UUID: ${uuid}, UserID: ${userid}`);
 
     // FIX: Test upload first file to detect errors early
     if (files.length > 0) {
