@@ -3,12 +3,14 @@ import { View, Text, TouchableOpacity, ScrollView, Dimensions, Alert, ActivityIn
 import { LinearGradient } from 'expo-linear-gradient';
 import * as DocumentPicker from 'expo-document-picker';
 import { useUpload } from '../contexts/UploadContext';
+import DynamicHeader from '../components/shared/DynamicHeader';
 
 const { width } = Dimensions.get('window');
 
-export default function UploadMockup({ session, setActiveMenu }) {
+export default function UploadMockup({ session, setActiveMenu, setSession }) {
   const { isUploading, currentBatch, totalBatches, batchProgress, startUpload, BATCH_SIZE } = useUpload();
   const [selectedImages, setSelectedImages] = useState([]);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   // Pick files using document picker
   const pickFiles = async () => {
@@ -70,28 +72,56 @@ export default function UploadMockup({ session, setActiveMenu }) {
     try {
       console.log(`[Upload] Starting upload via context: ${selectedImages.length} images`);
 
-      // Start upload via context (runs in background)
+      // FIX: Start upload via context - errors will be caught early
       const result = await startUpload(selectedImages);
 
       // Success
       const successCount = result.summary.success;
       const errorCount = result.summary.error;
 
+      // Only show success alert if there are no errors
+      if (errorCount === 0) {
+        Alert.alert(
+          'Upload Berhasil! ✅',
+          `${successCount} gambar berhasil diupload.\n\nGambar akan segera diproses oleh AI untuk deteksi bird drops.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                setSelectedImages([]);
+              }
+            }
+          ]
+        );
+      } else {
+        // Show error alert if some files failed
+        Alert.alert(
+          'Upload Selesai dengan Error ⚠️',
+          `${successCount} gambar berhasil diupload\n${errorCount} gambar gagal diupload.\n\nSilakan coba upload ulang file yang gagal.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Keep failed images in selection for retry
+              }
+            }
+          ]
+        );
+      }
+    } catch (error) {
+      console.error('[Upload] Error:', error);
+      // FIX: Show detailed error message immediately
+      const errorMessage = error.message || error.toString();
       Alert.alert(
-        errorCount === 0 ? 'Upload Berhasil! ✅' : 'Upload Selesai dengan Error ⚠️',
-        `${successCount} gambar berhasil diupload${errorCount > 0 ? `\n${errorCount} gambar gagal diupload` : ''}.\n\nGambar akan segera diproses oleh AI untuk deteksi bird drops.`,
+        'Upload Gagal ❌',
+        `Gagal mengupload gambar:\n\n${errorMessage}\n\nSilakan periksa:\n• Koneksi internet Anda\n• Endpoint server tersedia\n• Format file yang diupload`,
         [
           {
             text: 'OK',
-            onPress: () => {
-              setSelectedImages([]);
-            }
+            style: 'default'
           }
         ]
       );
-    } catch (error) {
-      console.error('[Upload] Error:', error);
-      Alert.alert('Upload Failed', `Gagal mengupload gambar:\n${error.message || error}`);
     }
   };
 
@@ -106,60 +136,15 @@ export default function UploadMockup({ session, setActiveMenu }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#F5F5F5' }}>
-      {/* Header - PERSIS seperti upload-menu.png */}
-      <LinearGradient
-        colors={['#1E9BE9', '#0EA5E9']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={{
-          paddingTop: 20,
-          paddingBottom: 20,
-          paddingHorizontal: 24,
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <View>
-          <Text style={{ fontSize: 32, fontWeight: '700', color: '#FFFFFF' }}>
-            Upload Images
-          </Text>
-          <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.9)', marginTop: 4 }}>
-            Batch Upload - 8 images per batch
-          </Text>
-        </View>
-
-        <View style={{ flexDirection: 'row', gap: 12 }}>
-          <View style={{
-            backgroundColor: 'rgba(255,255,255,0.25)',
-            paddingVertical: 8,
-            paddingHorizontal: 16,
-            borderRadius: 20,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <Text style={{ fontSize: 16 }}>📷</Text>
-            <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>
-              {session?.drone?.drone_code || 'Drone-001'}
-            </Text>
-          </View>
-          <View style={{
-            backgroundColor: 'rgba(255,255,255,0.25)',
-            paddingVertical: 8,
-            paddingHorizontal: 16,
-            borderRadius: 20,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <Text style={{ fontSize: 16 }}>🕐</Text>
-            <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>
-              {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-            </Text>
-          </View>
-        </View>
-      </LinearGradient>
+      {/* Dynamic Header Component */}
+      <DynamicHeader
+        title="Upload Images"
+        subtitle="Batch Upload - 8 images per batch"
+        session={session}
+        setSession={setSession}
+        onThemeToggle={(value) => setIsDarkMode(value)}
+        isDarkMode={isDarkMode}
+      />
 
       {/* Navigation Bar - PERSIS seperti mockup */}
       <View style={{

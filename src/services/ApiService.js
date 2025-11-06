@@ -107,14 +107,24 @@ export class ApiService {
         console.error('[API] JSON Parse Error:', jsonError);
         console.error('[API] Response text:', responseText.substring(0, 200));
 
-        // If response is HTML (session expired/invalid), clear session
-        if (responseText.includes('<html') || responseText.includes('<!DOCTYPE')) {
-          console.error('[API] Received HTML response - session likely invalid');
-          await this.clearSessionAndLogout();
-          throw new Error('SESSION_INVALID');
-        }
+        // 非JSON応答（HTML等）はセッションを即時削除せず、安全に失敗として返す
+        // ここではthrowしないことで、画面側で部分失敗を許容できる
+        const lowerText = responseText.toLowerCase();
+        const looksLikeHtml = responseText.includes('<html') || responseText.includes('<!DOCTYPE');
+        const hintsSessionMessage = (lowerText.includes('invalid') && lowerText.includes('session')) ||
+                                     (lowerText.includes('expired') && lowerText.includes('session')) ||
+                                     lowerText.includes('unauthorized');
 
-        throw new Error(`Invalid JSON response: ${jsonError.message}`);
+        // レスポンス本文にそれらしい文言があっても、ここではセッションクリアはしない
+        // 本当にセッション失効の場合はサーバが419/401を返し、下の処理で対応される
+        return {
+          success: false,
+          status_code: response.status,
+          message: looksLikeHtml || hintsSessionMessage
+            ? 'Non-JSON response received'
+            : (responseText || 'Invalid response from server'),
+          data: null,
+        };
       }
 
       // Add status_code to result (match Flutter response format)
@@ -153,7 +163,14 @@ export class ApiService {
     try {
       this.accessToken = null;
       this.refreshToken = null;
-      await AsyncStorage.multiRemove(['access_token', 'refresh_token', 'drone_data', 'logged_in_time']);
+      // Clear ALL session-related keys
+      await AsyncStorage.multiRemove([
+        'access_token',
+        'refresh_token',
+        'drone_data',
+        'session_data',
+        'logged_in_time'
+      ]);
       console.log('[API] Session cleared - user needs to login again');
     } catch (error) {
       console.error('[API] Error clearing session:', error);
@@ -232,7 +249,16 @@ export class ApiService {
     } finally {
       this.accessToken = null;
       this.refreshToken = null;
-      await AsyncStorage.multiRemove(['access_token', 'refresh_token', 'logged_in_time']);
+      // Clear ALL session-related keys
+      await AsyncStorage.multiRemove([
+        'access_token',
+        'refresh_token',
+        'drone_data',
+        'session_data',
+        'logged_in_time',
+        'login_response'
+      ]);
+      console.log('[API] Logout complete - all session data cleared');
     }
   }
 
@@ -559,5 +585,5 @@ export class ApiService {
   }
 }
 
-// Singleton instance - Use PRODUCTION by default for APK build
-export default new ApiService(true);
+// Singleton instance - Use DEVELOPMENT for testing (change to true for production APK build)
+export default new ApiService(false);

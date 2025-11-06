@@ -20,7 +20,7 @@ import UploadScreen from './UploadScreen';
 import CasesScreen from './CasesScreen';
 import MonitoringScreen from './MonitoringScreen';
 import UploadMockup from './UploadMockup';
-MonitoringMockup from './MonitoringMockup';
+import MonitoringMockup from './MonitoringMockup';
 import DocumentationsScreen from './DocumentationsScreen';
 import CasesMockup from './CasesMockup';
 import DashboardComplete from './DashboardComplete';
@@ -223,26 +223,26 @@ export default function DashboardScreen({ session, setSession }) {
 
   // Render Upload Screen - FULL MOCKUP (PERSIS seperti upload-menu.png)
   if (activeMenu === 'upload') {
-    return <UploadMockup session={session} setActiveMenu={setActiveMenu} />;
+    return <UploadMockup session={session} setActiveMenu={setActiveMenu} setSession={setSession} />;
   }
 
   // Render Cases Screen - FULL MOCKUP (PERSIS seperti cases-menu.png)
   if (activeMenu === 'cases') {
-    return <CasesMockup session={session} setActiveMenu={setActiveMenu} />;
+    return <CasesMockup session={session} setActiveMenu={setActiveMenu} setSession={setSession} />;
   }
 
   // Render Monitoring Screen - FULL MOCKUP (PERSIS seperti monitoring-menu.png)
   if (activeMenu === 'monitoring') {
-    return <MonitoringMockup session={session} setActiveMenu={setActiveMenu} />;
+    return <MonitoringMockup session={session} setActiveMenu={setActiveMenu} setSession={setSession} />;
   }
 
   // Render Documentations Screen - WebView
   if (activeMenu === 'documentations') {
-    return <DocumentationsScreen />;
+    return <DocumentationsScreen session={session} setActiveMenu={setActiveMenu} setSession={setSession} />;
   }
 
   // Render Dashboard - Enhanced Dashboard dengan Charts (mengikuti Flutter)
-  return <DashboardComplete session={session} setActiveMenu={setActiveMenu} />;
+  return <DashboardComplete session={session} setActiveMenu={setActiveMenu} setSession={setSession} />;
 }
 
 const styles = StyleSheet.create({

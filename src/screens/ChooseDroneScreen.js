@@ -64,12 +64,12 @@ export default function ChooseDroneScreen({ loginResponse, setSession }) {
               end={{ x: 1, y: 1 }}
               style={styles.glassGradient}
             >
-              <Text style={styles.cardTitle}>SELECTED DRONE</Text>
+              {/* <Text style={styles.cardTitle}>SELECTED DRONE</Text> */}
 
               {/* Drone Icon */}
-              <View style={styles.droneIconContainer}>
+              {/* <View style={styles.droneIconContainer}>
                 <Text style={styles.droneIcon}>🚁</Text>
-              </View>
+              </View> */}
 
               {/* Drone Code Display */}
               <View style={styles.droneInfoContainer}>

@@ -2,17 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import azureBlobService from '../services/AzureBlobService';
+import DynamicHeader from '../components/shared/DynamicHeader';
 
 const { width } = Dimensions.get('window');
 
 // Use real Azure data (credentials sudah diperbaiki)
 const USE_MOCK_DATA = false; // Set true jika ingin demo mode
 
-export default function MonitoringMockup({ session, setActiveMenu }) {
+export default function MonitoringMockup({ session, setActiveMenu, setSession }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [isPaused, setIsPaused] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   useEffect(() => {
     loadStats();
@@ -122,60 +124,15 @@ export default function MonitoringMockup({ session, setActiveMenu }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#F5F5F5' }}>
-      {/* Header */}
-      <LinearGradient
-        colors={['#1E9BE9', '#0EA5E9']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={{
-          paddingTop: 20,
-          paddingBottom: 20,
-          paddingHorizontal: 24,
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <View>
-          <Text style={{ fontSize: 32, fontWeight: '700', color: '#FFFFFF' }}>
-            Monitoring
-          </Text>
-          <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.9)', marginTop: 4 }}>
-            Azure Blob Storage File Monitoring
-          </Text>
-        </View>
-
-        <View style={{ flexDirection: 'row', gap: 12 }}>
-          <View style={{
-            backgroundColor: 'rgba(255,255,255,0.25)',
-            paddingVertical: 8,
-            paddingHorizontal: 16,
-            borderRadius: 20,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <Text style={{ fontSize: 16 }}>📷</Text>
-            <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>
-              {session?.drone?.drone_code || 'Drone-001'}
-            </Text>
-          </View>
-          <View style={{
-            backgroundColor: 'rgba(255,255,255,0.25)',
-            paddingVertical: 8,
-            paddingHorizontal: 16,
-            borderRadius: 20,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <Text style={{ fontSize: 16 }}>🕐</Text>
-            <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>
-              {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-            </Text>
-          </View>
-        </View>
-      </LinearGradient>
+      {/* Dynamic Header Component */}
+      <DynamicHeader
+        title="Monitoring"
+        subtitle="Azure Blob Storage File Monitoring"
+        session={session}
+        setSession={setSession}
+        onThemeToggle={(value) => setIsDarkMode(value)}
+        isDarkMode={isDarkMode}
+      />
 
       {/* Navigation Bar */}
       <View style={{
@@ -188,88 +145,99 @@ export default function MonitoringMockup({ session, setActiveMenu }) {
         shadowRadius: 4,
         elevation: 3,
       }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-        <TouchableOpacity
-          onPress={() => setActiveMenu('dashboard')}
-          style={{
-            paddingVertical: 12,
-            paddingHorizontal: 16,
-            borderRadius: 8,
-            backgroundColor: 'transparent',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <Text style={{ fontSize: 18 }}>📊</Text>
-          <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Dashboard</Text>
-        </TouchableOpacity>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={{ flexDirection: 'row', gap: 12, width }}>
+            <TouchableOpacity
+              onPress={() => setActiveMenu('dashboard')}
+              style={{
+                flex: 1,
+                paddingVertical: 12,
+                paddingHorizontal: 16,
+                borderRadius: 8,
+                backgroundColor: 'transparent',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>📊</Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Dashboard</Text>
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={() => setActiveMenu('upload')}
-          style={{
-            paddingVertical: 12,
-            paddingHorizontal: 16,
-            borderRadius: 8,
-            backgroundColor: 'transparent',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <Text style={{ fontSize: 18 }}>⬆️</Text>
-          <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Upload</Text>
-        </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setActiveMenu('upload')}
+              style={{
+                flex: 1,
+                paddingVertical: 12,
+                paddingHorizontal: 16,
+                borderRadius: 8,
+                backgroundColor: 'transparent',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>⬆️</Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Upload</Text>
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={() => setActiveMenu('cases')}
-          style={{
-            paddingVertical: 12,
-            paddingHorizontal: 16,
-            borderRadius: 8,
-            backgroundColor: 'transparent',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <Text style={{ fontSize: 18 }}>📋</Text>
-          <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Cases</Text>
-        </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setActiveMenu('cases')}
+              style={{
+                flex: 1,
+                paddingVertical: 12,
+                paddingHorizontal: 16,
+                borderRadius: 8,
+                backgroundColor: 'transparent',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>📋</Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Cases</Text>
+            </TouchableOpacity>
 
-        <View style={{
-          paddingVertical: 12,
-          paddingHorizontal: 16,
-          borderRadius: 8,
-          backgroundColor: '#0EA5E9',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          shadowColor: '#0EA5E9',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.3,
-          shadowRadius: 8,
-          elevation: 4,
-        }}>
-          <Text style={{ fontSize: 18 }}>📹</Text>
-          <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFFFFF' }}>Monitoring</Text>
-        </View>
+            <View style={{
+              flex: 1,
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: 8,
+              backgroundColor: '#0EA5E9',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              shadowColor: '#0EA5E9',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 4,
+            }}>
+              <Text style={{ fontSize: 18 }}>📹</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFFFFF' }}>Monitoring</Text>
+            </View>
+          </View>
 
-        <TouchableOpacity
-          onPress={() => setActiveMenu('documentations')}
-          style={{
-            paddingVertical: 12,
-            paddingHorizontal: 16,
-            borderRadius: 8,
-            backgroundColor: 'transparent',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          <Text style={{ fontSize: 18 }}>📚</Text>
-          <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Documentations</Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveMenu('documentations')}
+            style={{
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: 8,
+              backgroundColor: 'transparent',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              marginLeft: 12,
+            }}
+          >
+            <Text style={{ fontSize: 18 }}>📚</Text>
+            <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Documentations</Text>
+          </TouchableOpacity>
         </ScrollView>
       </View>
 

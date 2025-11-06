@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,10 +16,16 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import apiService from '../services/ApiService';
+import BulkAssignDialog from '../components/cases/BulkAssignDialog';
+import AssigneeDropdown from '../components/cases/AssigneeDropdown';
+import ValidationButton from '../components/cases/ValidationButton';
+import ValidationOptionsDialog from '../components/cases/ValidationOptionsDialog';
+import ExportCaseDialog from '../components/cases/ExportCaseDialog';
 
 const { width } = Dimensions.get('window');
 
 export default function CasesScreen({ session, setSession, activeMenu, setActiveMenu, isDarkMode }) {
+  console.log('[CasesScreen] Component loaded with NEW features: Bulk Assign, Assignee Dropdown, Validation, Export');
   const [cases, setCases] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [areas, setAreas] = useState([]);
@@ -43,14 +49,34 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
   const [showImageModal, setShowImageModal] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
+  // Bulk assign and export dialogs
+  const [showBulkAssignDialog, setShowBulkAssignDialog] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showValidationDialog, setShowValidationDialog] = useState(false);
+
+  // FIX: Tambahkan ref untuk track mounted status dan loading state
+  const isMountedRef = useRef(true);
+  const isLoadingRef = useRef(false);
+  const abortControllerRef = useRef(null);
+
+  // FIX: Cleanup saat component unmount
   useEffect(() => {
-    loadInitialData();
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Cancel ongoing requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
-  // Update time every second
+  // FIX: Update time every second dengan cleanup
   useEffect(() => {
     const timer = setInterval(() => {
-      setCurrentTime(new Date());
+      if (isMountedRef.current) {
+        setCurrentTime(new Date());
+      }
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -62,42 +88,27 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
     card: isDarkMode ? 'rgba(30, 144, 255, 0.1)' : 'rgba(255, 255, 255, 0.8)',
   };
 
-  const loadInitialData = async () => {
-    setLoading(true);
-    try {
-      await Promise.all([
-        loadCases(1, true),
-        loadWorkers(),
-        loadAreas(),
-      ]);
-    } catch (error) {
-      console.error('[Cases] Error loading initial data:', error);
-
-      // Check if error is session expired/invalid
-      if (error.message === 'SESSION_EXPIRED' || error.message === 'SESSION_INVALID') {
-        Alert.alert(
-          'Session Expired',
-          'Your session has expired. Please login again.',
-          [
-            {
-              text: 'OK',
-              onPress: () => setSession(null), // Trigger logout
-            },
-          ]
-        );
-      }
-    } finally {
-      setLoading(false);
+  // FIX: loadCases dengan useCallback dan mounted check
+  const loadCases = useCallback(async (page = 1, isRefresh = false) => {
+    // Prevent multiple overlapping calls
+    if (isLoadingRef.current && isRefresh) {
+      console.log('[Cases] Already loading, skipping duplicate call');
+      return;
     }
-  };
 
-  const loadCases = async (page = 1, isRefresh = false) => {
     try {
+      isLoadingRef.current = true;
       const response = await apiService.getCaseList({
         pageSize,
         page,
         filterAreaCode: selectedArea?.code || null,
       });
+
+      // Check if component is still mounted before updating state
+      if (!isMountedRef.current) {
+        console.log('[Cases] Component unmounted, skipping state update');
+        return;
+      }
 
       if (response.success && response.data) {
         const newCases = response.data;
@@ -115,15 +126,32 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
         }
       }
     } catch (error) {
-      console.error('[Cases] Error loading cases:', error);
+      // Check if component is still mounted before handling error
+      if (!isMountedRef.current) {
+        console.log('[Cases] Component unmounted, skipping error handling');
+        return;
+      }
+      
+      // Don't throw error if it's a session expired - let loadInitialData handle it
+      if (error.message !== 'SESSION_EXPIRED' && error.message !== 'SESSION_INVALID') {
+        console.error('[Cases] Error loading cases:', error);
+      }
       throw error;
+    } finally {
+      isLoadingRef.current = false;
     }
-  };
+  }, [selectedArea, pageSize]);
 
-  const loadWorkers = async () => {
+  // FIX: loadWorkers dengan mounted check
+  const loadWorkers = useCallback(async () => {
     try {
       const response = await apiService.getWorkers();
       console.log('[Cases] Workers response:', response);
+
+      // Check if component is still mounted
+      if (!isMountedRef.current) {
+        return;
+      }
 
       if (response.success && response.data) {
         setWorkers(response.data);
@@ -133,42 +161,144 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
       }
     } catch (error) {
       console.error('[Cases] Error loading workers:', error);
-      // Set empty array to prevent crash
-      setWorkers([]);
+      // Set empty array to prevent crash, but only if mounted
+      if (isMountedRef.current) {
+        setWorkers([]);
+      }
     }
-  };
+  }, []);
 
-  const loadAreas = async () => {
+  // FIX: loadAreas dengan mounted check
+  const loadAreas = useCallback(async () => {
     try {
       const response = await apiService.getAreas();
+      
+      // Check if component is still mounted
+      if (!isMountedRef.current) {
+        return;
+      }
+
       if (response.success && response.data) {
         setAreas(response.data);
       }
     } catch (error) {
       console.error('[Cases] Error loading areas:', error);
-      setAreas([]);
+      // Set empty array only if mounted
+      if (isMountedRef.current) {
+        setAreas([]);
+      }
     }
-  };
+  }, []);
 
+  // FIX: loadInitialData dengan mounted check dan prevent duplicate calls
+  const loadInitialData = useCallback(async () => {
+    // Prevent multiple simultaneous calls
+    if (isLoadingRef.current) {
+      console.log('[Cases] Initial data already loading, skipping');
+      return;
+    }
+
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    isLoadingRef.current = true;
+    if (isMountedRef.current) {
+      setLoading(true);
+    }
+
+    try {
+      const results = await Promise.allSettled([
+        loadCases(1, true),
+        loadWorkers(),
+        loadAreas(),
+      ]);
+
+      // Check if component is still mounted before processing results
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      const rejected = results.filter(r => r.status === 'rejected');
+      if (rejected.length > 0) {
+        const sessionError = rejected.find(r =>
+          r.reason && (r.reason.message === 'SESSION_EXPIRED' || r.reason.message === 'SESSION_INVALID')
+        );
+        if (sessionError) {
+          Alert.alert(
+            'Session Expired',
+            'Your session has expired. Please login again.',
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  if (isMountedRef.current) {
+                    setSession(null);
+                  }
+                },
+              },
+            ]
+          );
+        } else {
+          console.warn('[Cases] Some resources failed to load, continuing with partial data');
+        }
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        console.error('[Cases] Unexpected error loading initial data:', error);
+      }
+    } finally {
+      isLoadingRef.current = false;
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [loadCases, loadWorkers, loadAreas, setSession]);
+
+  // FIX: useEffect untuk loadInitialData - hanya dipanggil sekali saat mount
+  useEffect(() => {
+    // Load initial data hanya sekali saat component mount
+    loadInitialData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty dependency array - hanya run sekali saat mount
+
+  // FIX: onRefresh dengan useCallback dan proper dependencies
   const onRefresh = useCallback(async () => {
+    // Prevent multiple simultaneous refresh calls
+    if (refreshing || isLoadingRef.current) {
+      console.log('[Cases] Already refreshing, skipping duplicate refresh');
+      return;
+    }
+
+    if (!isMountedRef.current) {
+      return;
+    }
+
     setRefreshing(true);
     try {
       await loadCases(1, true);
     } finally {
-      setRefreshing(false);
+      if (isMountedRef.current) {
+        setRefreshing(false);
+      }
     }
-  }, [selectedArea]);
+  }, [loadCases, refreshing]);
 
-  const loadMore = async () => {
-    if (loadingMore || !hasMoreData) return;
+  // FIX: loadMore dengan mounted check
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMoreData || !isMountedRef.current || isLoadingRef.current) {
+      return;
+    }
 
     setLoadingMore(true);
     try {
       await loadCases(currentPage + 1, false);
     } finally {
-      setLoadingMore(false);
+      if (isMountedRef.current) {
+        setLoadingMore(false);
+      }
     }
-  };
+  }, [loadCases, currentPage, loadingMore, hasMoreData]);
 
   const handleAssignWorker = async (workerId) => {
     if (!selectedCase) return;
@@ -199,6 +329,7 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
       if (response.success) {
         Alert.alert('Success', 'Case validated successfully');
         setShowValidateModal(false);
+        setShowValidationDialog(false);
         onRefresh();
       }
     } catch (error) {
@@ -207,21 +338,96 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
     }
   };
 
-  const applyFilter = (area) => {
+  const handleBulkAssign = async (workerId) => {
+    try {
+      const response = await apiService.bulkAssign(workerId);
+      if (response.success) {
+        Alert.alert('Success', 'Bulk assign completed successfully');
+        setShowBulkAssignDialog(false);
+        onRefresh();
+      }
+    } catch (error) {
+      console.error('[Cases] Error bulk assigning:', error);
+      Alert.alert('Error', 'Failed to bulk assign workers');
+    }
+  };
+
+  const handleAssigneeChange = async (caseItem, worker) => {
+    try {
+      const response = await apiService.assignWorker(caseItem.id, worker.id);
+      if (response.success) {
+        // Update local state
+        setCases(prevCases =>
+          prevCases.map(c =>
+            c.id === caseItem.id ? { ...c, worker } : c
+          )
+        );
+      }
+    } catch (error) {
+      console.error('[Cases] Error assigning worker:', error);
+      Alert.alert('Error', 'Failed to assign worker');
+    }
+  };
+
+  const handleValidationPress = (caseItem, hasWorker) => {
+    if (!hasWorker) {
+      Alert.alert('Error', 'Please assign a worker first');
+      return;
+    }
+    setSelectedCase(caseItem);
+    setShowValidationDialog(true);
+  };
+
+  const handleGenerateReport = async (areaCode) => {
+    try {
+      const response = await apiService.generateReport(areaCode);
+      if (response.success) {
+        return { reportUrl: response.reportUrl || response.data?.reportUrl };
+      }
+      throw new Error('Failed to generate report');
+    } catch (error) {
+      console.error('[Cases] Error generating report:', error);
+      throw error;
+    }
+  };
+
+  const handleSendEmail = async (reportUrl) => {
+    try {
+      const response = await apiService.sendReportViaEmail(reportUrl);
+      if (!response.success) {
+        throw new Error('Failed to send email');
+      }
+    } catch (error) {
+      console.error('[Cases] Error sending email:', error);
+      throw error;
+    }
+  };
+
+  // FIX: applyFilter dengan mounted check
+  const applyFilter = useCallback((area) => {
+    if (!isMountedRef.current) {
+      return;
+    }
     setSelectedArea(area);
     setShowFilterModal(false);
     setCurrentPage(1);
     setHasMoreData(true);
+    // loadCases akan dipanggil otomatis karena selectedArea berubah
     loadCases(1, true);
-  };
+  }, [loadCases]);
 
-  const resetFilter = () => {
+  // FIX: resetFilter dengan mounted check
+  const resetFilter = useCallback(() => {
+    if (!isMountedRef.current) {
+      return;
+    }
     setSelectedArea(null);
     setShowFilterModal(false);
     setCurrentPage(1);
     setHasMoreData(true);
+    // loadCases akan dipanggil otomatis karena selectedArea berubah
     loadCases(1, true);
-  };
+  }, [loadCases]);
 
   const getStatusColor = (statusName) => {
     switch (statusName?.toLowerCase()) {
@@ -258,6 +464,7 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
       <Text style={[styles.headerCell, styles.colArea]}>AREA</Text>
       <Text style={[styles.headerCell, styles.colDate]}>DATE</Text>
       <Text style={[styles.headerCell, styles.colAssigned]}>ASSIGNED</Text>
+      <Text style={[styles.headerCell, styles.colValidation]}>VALIDATION</Text>
       <Text style={[styles.headerCell, styles.colStatus]}>STATUS</Text>
     </View>
   );
@@ -289,17 +496,21 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
         {formatDate(item.detected_date)}
       </Text>
 
-      <TouchableOpacity
-        style={[styles.cell, styles.colAssigned]}
-        onPress={() => {
-          setSelectedCase(item);
-          setShowAssignModal(true);
-        }}
-      >
-        <Text style={styles.assignText} numberOfLines={1}>
-          {item.worker?.fullname || 'Tap'}
-        </Text>
-      </TouchableOpacity>
+      <View style={[styles.cell, styles.colAssigned]}>
+        <AssigneeDropdown
+          currentWorker={item.worker}
+          workers={workers}
+          onWorkerChange={(worker) => handleAssigneeChange(item, worker)}
+        />
+      </View>
+
+      <View style={[styles.cell, styles.colValidation]}>
+        <ValidationButton
+          statusName={item.status?.name}
+          onPress={(hasWorker) => handleValidationPress(item, hasWorker)}
+          hasWorker={!!item.worker}
+        />
+      </View>
 
       <TouchableOpacity
         style={[styles.cell, styles.colStatus]}
@@ -448,6 +659,14 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
             <Text style={styles.resetButtonText}>✕</Text>
           </TouchableOpacity>
         )}
+        <TouchableOpacity style={styles.bulkButton} onPress={() => setShowBulkAssignDialog(true)}>
+          <Text style={styles.bulkButtonIcon}>👥</Text>
+          <Text style={styles.bulkButtonText}>Bulk</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.exportButton} onPress={() => setShowExportDialog(true)}>
+          <Text style={styles.exportButtonIcon}>📄</Text>
+          <Text style={styles.exportButtonText}>Export</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Table */}
@@ -551,6 +770,31 @@ export default function CasesScreen({ session, setSession, activeMenu, setActive
           </View>
         </View>
       </Modal>
+
+      {/* Bulk Assign Dialog */}
+      <BulkAssignDialog
+        visible={showBulkAssignDialog}
+        onClose={() => setShowBulkAssignDialog(false)}
+        workers={workers}
+        onBulkAssign={handleBulkAssign}
+      />
+
+      {/* Validation Options Dialog */}
+      <ValidationOptionsDialog
+        visible={showValidationDialog}
+        onClose={() => setShowValidationDialog(false)}
+        onConfirm={handleValidateCase}
+        caseName={selectedCase?.carpool?.block}
+      />
+
+      {/* Export Case Dialog */}
+      <ExportCaseDialog
+        visible={showExportDialog}
+        onClose={() => setShowExportDialog(false)}
+        areas={areas}
+        onGenerateReport={handleGenerateReport}
+        onSendEmail={handleSendEmail}
+      />
     </View>
   );
 }
@@ -615,6 +859,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  bulkButton: {
+    backgroundColor: '#FF9800',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  bulkButtonIcon: {
+    fontSize: 14,
+  },
+  bulkButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  exportButton: {
+    backgroundColor: '#4CAF50',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  exportButtonIcon: {
+    fontSize: 14,
+  },
+  exportButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   tableContainer: {
     flex: 1,
     marginHorizontal: 8,
@@ -649,22 +927,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   colNo: {
-    flex: 0.5,
+    flex: 0.4,
   },
   colImage: {
-    flex: 1.2,
-  },
-  colArea: {
     flex: 1,
   },
+  colArea: {
+    flex: 0.8,
+  },
   colDate: {
-    flex: 1.8,
+    flex: 1.5,
   },
   colAssigned: {
-    flex: 1.5,
+    flex: 1.8,
+  },
+  colValidation: {
+    flex: 1.2,
   },
   colStatus: {
-    flex: 1.5,
+    flex: 1.3,
   },
   thumbnail: {
     width: 50,

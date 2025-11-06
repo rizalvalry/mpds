@@ -21,8 +21,17 @@ function MainApp() {
   // Handle logout and clear session
   const handleLogout = async () => {
     try {
-      console.log('[App] Logging out and clearing session');
-      await AsyncStorage.multiRemove(['access_token', 'refresh_token', 'drone_data', 'logged_in_time']);
+      console.log('[App] Logging out and clearing ALL session data');
+      // Clear ALL session-related keys from AsyncStorage
+      await AsyncStorage.multiRemove([
+        'access_token',
+        'refresh_token',
+        'drone_data',
+        'session_data',
+        'logged_in_time'
+      ]);
+      console.log('[App] Session cleared from AsyncStorage');
+
       setSession(null);
       setLoginResponse(null);
       setCurrentScreen('login');
@@ -45,32 +54,49 @@ function MainApp() {
     // Check for existing session
     const loadSession = async () => {
       try {
-        const accessToken = await AsyncStorage.getItem('access_token');
-        const refreshToken = await AsyncStorage.getItem('refresh_token');
-        const droneData = await AsyncStorage.getItem('drone_data');
+        // Try to load complete session data first (new format)
+        const sessionDataString = await AsyncStorage.getItem('session_data');
 
-        if (accessToken && refreshToken) {
-          console.log('[App] Found existing session, loading...');
-          const sessionData = {
-            session_token: accessToken,
-            refresh_token: refreshToken
-          };
-
-          // Add drone data if available
-          if (droneData) {
-            const drone = JSON.parse(droneData);
-            sessionData.drone = drone;
-          }
+        if (sessionDataString) {
+          console.log('[App] Found complete session data, restoring...');
+          const sessionData = JSON.parse(sessionDataString);
+          console.log('[App] Restored session:', {
+            username: sessionData.username,
+            role: sessionData.role,
+            drone_code: sessionData.drone?.drone_code
+          });
 
           setSession(sessionData);
           setCurrentScreen('dashboard');
         } else {
-          console.log('[App] No existing session found');
+          // Fallback to old format (for backward compatibility)
+          const accessToken = await AsyncStorage.getItem('access_token');
+          const refreshToken = await AsyncStorage.getItem('refresh_token');
+          const droneData = await AsyncStorage.getItem('drone_data');
+
+          if (accessToken && refreshToken) {
+            console.log('[App] Found legacy session format, loading...');
+            const sessionData = {
+              session_token: accessToken,
+              refresh_token: refreshToken
+            };
+
+            // Add drone data if available
+            if (droneData) {
+              const drone = JSON.parse(droneData);
+              sessionData.drone = drone;
+            }
+
+            setSession(sessionData);
+            setCurrentScreen('dashboard');
+          } else {
+            console.log('[App] No existing session found');
+          }
         }
       } catch (error) {
         console.error('[App] Error loading session:', error);
         // Clear potentially corrupted session
-        await AsyncStorage.multiRemove(['access_token', 'refresh_token', 'drone_data']);
+        await AsyncStorage.multiRemove(['access_token', 'refresh_token', 'drone_data', 'session_data']);
       } finally {
         setLoading(false);
       }
@@ -90,16 +116,35 @@ function MainApp() {
   const handleCompleteDroneSelection = async (response) => {
     try {
       console.log('[App] Completing drone selection and saving session');
+      console.log('[App] Full response:', response);
 
-      // Save session data
+      // Save ALL session data to AsyncStorage
       await AsyncStorage.setItem('access_token', response.session_token);
       await AsyncStorage.setItem('refresh_token', response.refresh_token);
 
-      // Save drone data separately for future sessions
+      // Save complete session data as JSON for full restoration
+      const sessionData = {
+        session_token: response.session_token,
+        refresh_token: response.refresh_token,
+        expires_at: response.expires_at,
+        user_id: response.user_id,
+        username: response.username,
+        role_id: response.role_id,
+        role: response.role,
+        drone: response.drone,
+        status: response.status,
+        status_code: response.status_code,
+        message: response.message
+      };
+
+      await AsyncStorage.setItem('session_data', JSON.stringify(sessionData));
+
+      // Save drone data separately for backward compatibility
       if (response.drone) {
         await AsyncStorage.setItem('drone_data', JSON.stringify(response.drone));
       }
 
+      console.log('[App] Session saved successfully to AsyncStorage');
       setSession(response);
       setCurrentScreen('dashboard');
     } catch (error) {

@@ -10,14 +10,27 @@ const CHUNK_SIZE = 512 * 1024; // 512KB - exact match with Flutter
 const DEV_BASE_URL = 'rnd-dev.bsi.co.id';
 const PROD_BASE_URL = 'droneark.bsi.co.id';
 
+/**
+ * Generate UUID v4 (simple implementation)
+ * Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+ */
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 export class ChunkedUploadService {
   constructor(useProd = true) {
     this.baseUrl = useProd ? PROD_BASE_URL : DEV_BASE_URL;
-    // CORRECT URL based on backend analysis
-    // Backend path: /services/upload/api/v1/upload/chunk
+    // CORRECT URL based on Azure Ingress configuration
+    // Development: /drone/upload/api/v1/upload/chunk (rewritten to /api/v1/upload/chunk by ingress)
+    // Production: /services/upload/api/v1/upload/chunk (rewritten to /api/v1/upload/chunk by ingress)
     this.uploadUrl = useProd
       ? 'https://droneark.bsi.co.id/services/upload/api/v1/upload/chunk'
-      : 'https://rnd-dev.bsi.co.id/services/upload/api/v1/upload/chunk';
+      : 'https://rnd-dev.bsi.co.id/drone/upload/api/v1/upload/chunk';
   }
 
   // Initialize - backend doesn't require authentication
@@ -34,8 +47,10 @@ export class ChunkedUploadService {
    * @param {number} totalChunks - Total number of chunks
    * @param {string} originalName - Original filename
    * @param {function} onProgress - Progress callback
+   * @param {string} uuid - UUID for organizing uploads (optional, required for development)
+   * @param {string} userid - User ID (optional, required for development)
    */
-  async uploadChunk(chunkBlob, fileId, chunkIndex, totalChunks, originalName, onProgress) {
+  async uploadChunk(chunkBlob, fileId, chunkIndex, totalChunks, originalName, onProgress, uuid = null, userid = null) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
@@ -83,28 +98,37 @@ export class ChunkedUploadService {
       });
 
       // Create FormData - EXACT backend requirements
-      // Backend expects: file_id, chunk_index, total_chunks, original_name, file
-      // Backend does NOT expect: uuid, userid, or Authorization header
+      // Backend Production: file_id, chunk_index, total_chunks, original_name, file
+      // Backend Development: file_id, chunk_index, total_chunks, original_name, file, uuid, userid
       const formData = new FormData();
 
       // Required parameter: file (binary data)
+      // React Native FormData format: { uri, type, name }
       formData.append('file', {
         uri: chunkBlob,
-        type: 'image/jpeg', // or detect from filename
-        name: originalName, // Use original filename, not .part extension
+        type: 'image/jpeg', // Default to jpeg, can be detected from filename if needed
+        name: originalName, // Use original filename with extension
       });
 
-      // Required parameter: file_id (unique upload session ID)
-      formData.append('file_id', fileId);
+      // Required parameter: file_id (unique upload session ID) - must be string
+      formData.append('file_id', String(fileId));
 
-      // Required parameter: chunk_index (0-based, integer)
-      formData.append('chunk_index', chunkIndex);
+      // Required parameter: chunk_index (0-based, integer) - must be string for FormData
+      formData.append('chunk_index', String(chunkIndex));
 
-      // Required parameter: total_chunks (integer)
-      formData.append('total_chunks', totalChunks);
+      // Required parameter: total_chunks (integer) - must be string for FormData
+      formData.append('total_chunks', String(totalChunks));
 
-      // Required parameter: original_name (filename with extension)
-      formData.append('original_name', originalName);
+      // Required parameter: original_name (filename with extension) - must be string
+      formData.append('original_name', String(originalName));
+
+      // Optional parameters for development environment (required in dev, optional in prod)
+      if (uuid) {
+        formData.append('uuid', String(uuid));
+      }
+      if (userid) {
+        formData.append('userid', String(userid));
+      }
 
       xhr.open('POST', this.uploadUrl);
       // No Authorization header - backend doesn't validate it
@@ -117,6 +141,8 @@ export class ChunkedUploadService {
       console.log(`[ChunkUpload] original_name: ${originalName}`);
       console.log(`[ChunkUpload] chunk_index: ${chunkIndex}`);
       console.log(`[ChunkUpload] total_chunks: ${totalChunks}`);
+      console.log(`[ChunkUpload] uuid: ${uuid || 'not provided'}`);
+      console.log(`[ChunkUpload] userid: ${userid || 'not provided'}`);
       console.log(`[ChunkUpload] ========================================`);
 
       xhr.send(formData);
@@ -128,8 +154,10 @@ export class ChunkedUploadService {
    * React Native FormData natively handles file upload without manual chunking
    * @param {object} file - File object with uri, fileName, size, type
    * @param {function} onProgress - Progress callback (0-100)
+   * @param {string} uuid - UUID for organizing uploads (optional, required for development)
+   * @param {string} userid - User ID (optional, required for development)
    */
-  async uploadFileChunked(file, onProgress) {
+  async uploadFileChunked(file, onProgress, uuid = null, userid = null) {
     await this.init(); // Initialize
 
     // Generate unique file ID - use timestamp + random string
@@ -161,7 +189,9 @@ export class ChunkedUploadService {
           if (onProgress) {
             onProgress(chunkProgress);
           }
-        }
+        },
+        uuid,    // Pass uuid to uploadChunk
+        userid   // Pass userid to uploadChunk
       );
 
       console.log(`[ChunkUpload] File ${file.fileName} uploaded successfully`);
@@ -179,10 +209,37 @@ export class ChunkedUploadService {
    * @param {number} batchSize - Number of files to upload in parallel (default: 8 like Flutter)
    * @param {function} onBatchProgress - Batch progress callback
    * @param {function} onFileProgress - Per-file progress callback
+   * @param {string} uuid - UUID for organizing uploads (optional, will be auto-generated if not provided)
+   * @param {string} userid - User ID (optional, will be retrieved from session if not provided)
    */
-  async uploadBatch(files, batchSize = 8, onBatchProgress, onFileProgress) {
+  async uploadBatch(files, batchSize = 8, onBatchProgress, onFileProgress, uuid = null, userid = null) {
     const results = [];
     const batches = [];
+
+    // Auto-generate UUID if not provided
+    if (!uuid) {
+      uuid = generateUUID();
+      console.log(`[ChunkUpload] Generated UUID: ${uuid}`);
+    }
+
+    // Retrieve userid from session if not provided
+    if (!userid) {
+      try {
+        const loginResponse = await AsyncStorage.getItem('login_response');
+        if (loginResponse) {
+          const userData = JSON.parse(loginResponse);
+          userid = userData.user_id || userData.id;
+          console.log(`[ChunkUpload] Retrieved user_id from session: ${userid}`);
+        }
+      } catch (error) {
+        console.error('[ChunkUpload] Failed to retrieve user_id from session:', error);
+      }
+    }
+
+    // Validate that we have uuid and userid
+    if (!uuid || !userid) {
+      throw new Error('UUID and userid are required for upload. Please ensure you are logged in.');
+    }
 
     // Split files into batches
     for (let i = 0; i < files.length; i += batchSize) {
@@ -190,29 +247,55 @@ export class ChunkedUploadService {
     }
 
     console.log(`[ChunkUpload] Starting batch upload: ${files.length} files in ${batches.length} batches`);
+    console.log(`[ChunkUpload] UUID: ${uuid}, UserID: ${userid}`);
 
-    // Process batches sequentially
+    // FIX: Test upload first file to detect errors early
+    if (files.length > 0) {
+      console.log(`[ChunkUpload] Testing connection with first file: ${files[0].fileName}`);
+      try {
+        const testResult = await this.uploadFileChunked(files[0], (progress) => {
+          if (onFileProgress) {
+            onFileProgress(files[0].id, progress, files[0].fileName);
+          }
+        }, uuid, userid);  // Pass uuid and userid
+        console.log(`[ChunkUpload] ✅ Test upload successful: ${files[0].fileName}`);
+        results.push({ success: true, file: files[0], result: testResult });
+      } catch (error) {
+        console.error(`[ChunkUpload] ❌ Test upload failed: ${files[0].fileName}`, error);
+        // Throw error immediately to stop upload process
+        throw new Error(`Upload gagal: ${error.message || 'Tidak dapat terhubung ke server. Pastikan koneksi internet Anda stabil dan endpoint server tersedia.'}`);
+      }
+    }
+
+    // Process remaining files in batches
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
+      
+      // Skip first file if it's already uploaded (test upload)
+      const filesToUpload = batchIndex === 0 ? batch.slice(1) : batch;
+      
+      if (filesToUpload.length === 0) {
+        continue; // Skip empty batch
+      }
 
       if (onBatchProgress) {
         onBatchProgress({
           currentBatch: batchIndex + 1,
           totalBatches: batches.length,
-          imagesInBatch: batch.length,
+          imagesInBatch: filesToUpload.length,
         });
       }
 
-      console.log(`[ChunkUpload] Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
+      console.log(`[ChunkUpload] Processing batch ${batchIndex + 1}/${batches.length} (${filesToUpload.length} files)`);
 
       // Upload files in current batch in parallel (like Flutter)
-      const batchPromises = batch.map(async (file) => {
+      const batchPromises = filesToUpload.map(async (file) => {
         try {
           const result = await this.uploadFileChunked(file, (progress) => {
             if (onFileProgress) {
               onFileProgress(file.id, progress, file.fileName);
             }
-          });
+          }, uuid, userid);  // Pass uuid and userid
 
           console.log(`[ChunkUpload] Success: ${file.fileName}`);
           return { success: true, file, result };
@@ -248,5 +331,5 @@ export class ChunkedUploadService {
   }
 }
 
-// Singleton instance - Use PRODUCTION by default
-export default new ChunkedUploadService(true);
+// Singleton instance - Use DEVELOPMENT for testing (change to true for production APK build)
+export default new ChunkedUploadService(false);

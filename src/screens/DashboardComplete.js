@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator
 import { LinearGradient } from 'expo-linear-gradient';
 import { PieChart, BarChart } from 'react-native-chart-kit';
 import apiService from '../services/ApiService';
+import DynamicHeader from '../components/shared/DynamicHeader';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width > 1200 ? (width - 96) / 5 : (width - 72) / 5; // For 5 cards (filter + 4 stats)
@@ -20,10 +21,11 @@ const chartConfig = {
   },
 };
 
-export default function DashboardComplete({ session, setActiveMenu }) {
+export default function DashboardComplete({ session, setActiveMenu, setSession }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState('today'); // today, week, month
+  const [isDarkMode, setIsDarkMode] = useState(false);
 
   // Data states
   const [dashboardOverview, setDashboardOverview] = useState(null);
@@ -194,60 +196,15 @@ export default function DashboardComplete({ session, setActiveMenu }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: '#F5F5F5' }}>
-      {/* Header */}
-      <LinearGradient
-        colors={['#1E9BE9', '#0EA5E9']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={{
-          paddingTop: 20,
-          paddingBottom: 20,
-          paddingHorizontal: 24,
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <View>
-          <Text style={{ fontSize: 32, fontWeight: '700', color: '#FFFFFF' }}>
-            Dashboard
-          </Text>
-          <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.9)', marginTop: 4 }}>
-            MPDS - Drone Operations Analytics
-          </Text>
-        </View>
-
-        <View style={{ flexDirection: 'row', gap: 12 }}>
-          <View style={{
-            backgroundColor: 'rgba(255,255,255,0.25)',
-            paddingVertical: 8,
-            paddingHorizontal: 16,
-            borderRadius: 20,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <Text style={{ fontSize: 16 }}>📷</Text>
-            <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>
-              {session?.drone?.drone_code || 'Drone-001'}
-            </Text>
-          </View>
-          <View style={{
-            backgroundColor: 'rgba(255,255,255,0.25)',
-            paddingVertical: 8,
-            paddingHorizontal: 16,
-            borderRadius: 20,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-          }}>
-            <Text style={{ fontSize: 16 }}>🕐</Text>
-            <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '600' }}>
-              {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
-            </Text>
-          </View>
-        </View>
-      </LinearGradient>
+      {/* Dynamic Header Component */}
+      <DynamicHeader
+        title="Dashboard"
+        subtitle="MPDS - Drone Operations Analytics"
+        session={session}
+        setSession={setSession}
+        onThemeToggle={(value) => setIsDarkMode(value)}
+        isDarkMode={isDarkMode}
+      />
 
       {/* Navigation Bar */}
       <View style={{
@@ -260,72 +217,82 @@ export default function DashboardComplete({ session, setActiveMenu }) {
         shadowRadius: 4,
         elevation: 3,
       }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-          <View style={{
-            paddingVertical: 12,
-            paddingHorizontal: 16,
-            borderRadius: 8,
-            backgroundColor: '#0EA5E9',
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-            shadowColor: '#0EA5E9',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.3,
-            shadowRadius: 8,
-            elevation: 4,
-          }}>
-            <Text style={{ fontSize: 18 }}>📊</Text>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFFFFF' }}>Dashboard</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={{ flexDirection: 'row', gap: 12, width }}>
+            <View style={{
+              flex: 1,
+              paddingVertical: 12,
+              paddingHorizontal: 16,
+              borderRadius: 8,
+              backgroundColor: '#0EA5E9',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              shadowColor: '#0EA5E9',
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.3,
+              shadowRadius: 8,
+              elevation: 4,
+            }}>
+              <Text style={{ fontSize: 18 }}>📊</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFFFFF' }}>Dashboard</Text>
+            </View>
+
+            <TouchableOpacity
+              onPress={() => setActiveMenu('upload')}
+              style={{
+                flex: 1,
+                paddingVertical: 12,
+                paddingHorizontal: 16,
+                borderRadius: 8,
+                backgroundColor: 'transparent',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>⬆️</Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Upload</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setActiveMenu('cases')}
+              style={{
+                flex: 1,
+                paddingVertical: 12,
+                paddingHorizontal: 16,
+                borderRadius: 8,
+                backgroundColor: 'transparent',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>📋</Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Cases</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setActiveMenu('monitoring')}
+              style={{
+                flex: 1,
+                paddingVertical: 12,
+                paddingHorizontal: 16,
+                borderRadius: 8,
+                backgroundColor: 'transparent',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <Text style={{ fontSize: 18 }}>📹</Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Monitoring</Text>
+            </TouchableOpacity>
           </View>
-
-          <TouchableOpacity
-            onPress={() => setActiveMenu('upload')}
-            style={{
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              borderRadius: 8,
-              backgroundColor: 'transparent',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            <Text style={{ fontSize: 18 }}>⬆️</Text>
-            <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Upload</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => setActiveMenu('cases')}
-            style={{
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              borderRadius: 8,
-              backgroundColor: 'transparent',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            <Text style={{ fontSize: 18 }}>📋</Text>
-            <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Cases</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={() => setActiveMenu('monitoring')}
-            style={{
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              borderRadius: 8,
-              backgroundColor: 'transparent',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-            }}
-          >
-            <Text style={{ fontSize: 18 }}>📹</Text>
-            <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Monitoring</Text>
-          </TouchableOpacity>
 
           <TouchableOpacity
             onPress={() => setActiveMenu('documentations')}
@@ -337,6 +304,7 @@ export default function DashboardComplete({ session, setActiveMenu }) {
               flexDirection: 'row',
               alignItems: 'center',
               gap: 8,
+              marginLeft: 12,
             }}
           >
             <Text style={{ fontSize: 18 }}>📚</Text>
