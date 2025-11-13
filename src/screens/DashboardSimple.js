@@ -14,7 +14,9 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../contexts/ThemeContext';
+import AppLayout from '../layouts/AppLayout';
 import apiService from '../services/ApiService';
 import UploadScreen from './UploadScreen';
 import CasesScreen from './CasesScreen';
@@ -29,6 +31,32 @@ const { width } = Dimensions.get('window');
 
 export default function DashboardScreen({ session, setSession }) {
   const { theme, isDarkMode, toggleTheme } = useTheme();
+
+  // Dynamic upload subtitle state
+  const [uploadSubtitle, setUploadSubtitle] = useState('Batch Upload - 8 images per batch');
+
+  const menuMeta = {
+    dashboard: {
+      title: 'Dashboard',
+      subtitle: 'MPDS - Drone Operations Analytics',
+    },
+    upload: {
+      title: 'Upload Images',
+      subtitle: uploadSubtitle, // Now dynamic
+    },
+    cases: {
+      title: 'Cases Management',
+      subtitle: 'Track and Monitor All Drone Operations',
+    },
+    monitoring: {
+      title: 'Monitoring',
+      subtitle: 'Upload Progress Tracking',
+    },
+    documentations: {
+      title: 'Documentations',
+      subtitle: 'Project Documents & Guides',
+    },
+  };
 
   // State for dashboard data (sesuai Flutter)
   const [loading, setLoading] = useState(true);
@@ -85,6 +113,41 @@ export default function DashboardScreen({ session, setSession }) {
       loadDashboardData();
     }
   }, [activeMenu]);
+
+  // Load upload subtitle dynamically from AsyncStorage
+  useEffect(() => {
+    const loadUploadSubtitle = async () => {
+      try {
+        const uploadMethod = await AsyncStorage.getItem('upload_method');
+        const maxBatch = await AsyncStorage.getItem('max_images_per_batch');
+
+        const method = uploadMethod || 'chunking';
+        const batchSize = maxBatch ? parseInt(maxBatch, 10) : 8;
+
+        let displayMethod = '';
+        switch (method) {
+          case 'chunking':
+            displayMethod = 'Chunked Upload';
+            break;
+          case 'direct':
+            displayMethod = 'Direct Upload';
+            break;
+          default:
+            displayMethod = 'Batch Upload';
+        }
+
+        const subtitle = `${displayMethod} - ${batchSize} images per batch`;
+        setUploadSubtitle(subtitle);
+
+        console.log('[DashboardSimple] Upload subtitle set:', subtitle);
+      } catch (error) {
+        console.error('[DashboardSimple] Error loading upload subtitle:', error);
+        setUploadSubtitle('Batch Upload - 8 images per batch'); // Fallback
+      }
+    };
+
+    loadUploadSubtitle();
+  }, []);
 
   // Set initial orientation to landscape on mount
   useEffect(() => {
@@ -197,52 +260,106 @@ export default function DashboardScreen({ session, setSession }) {
     );
   };
 
+  const handleChangeMenu = (menuKey) => {
+    setActiveMenu(menuKey);
+  };
+
+  const renderContent = () => {
+    switch (activeMenu) {
+      case 'upload':
+        return (
+          <UploadMockup
+            session={session}
+            setSession={setSession}
+            setActiveMenu={handleChangeMenu}
+            embedded
+            onNavigate={handleChangeMenu}
+          />
+        );
+      case 'cases':
+        return (
+          <CasesMockup
+            session={session}
+            setSession={setSession}
+            setActiveMenu={handleChangeMenu}
+            embedded
+            onNavigate={handleChangeMenu}
+          />
+        );
+      case 'monitoring':
+        return (
+          <MonitoringMockup
+            session={session}
+            setSession={setSession}
+            setActiveMenu={handleChangeMenu}
+            embedded
+            onNavigate={handleChangeMenu}
+          />
+        );
+      case 'documentations':
+        return (
+          <DocumentationsScreen
+            session={session}
+            setSession={setSession}
+            setActiveMenu={handleChangeMenu}
+            embedded
+            onNavigate={handleChangeMenu}
+          />
+        );
+      case 'dashboard':
+      default:
+        return <DashboardComplete />;
+    }
+  };
+
+  const layoutTitle = menuMeta[activeMenu]?.title || 'Dashboard';
+  const layoutSubtitle = menuMeta[activeMenu]?.subtitle || 'Motor Pool Drone Systems';
+
   if (loading && !refreshing) {
     return (
-      <View style={styles.container}>
-        <LinearGradient
-          colors={['#00BFFF', '#1E90FF', '#0047AB']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.loadingGradient}
-        >
-          <View style={styles.loadingContainer}>
-            <LinearGradient
-              colors={['rgba(255,255,255,0.3)', 'rgba(255,255,255,0.1)']}
-              style={styles.loadingCard}
-            >
-              <ActivityIndicator size="large" color="#fff" />
-              <Text style={styles.loadingText}>Motor Pool Drone System</Text>
-              <Text style={styles.loadingSubtext}>Loading Dashboard Data...</Text>
-            </LinearGradient>
-          </View>
-        </LinearGradient>
-      </View>
+      <AppLayout
+        session={session}
+        setSession={setSession}
+        activeMenu={activeMenu}
+        onChangeMenu={handleChangeMenu}
+        title={layoutTitle}
+        subtitle={layoutSubtitle}
+      >
+        <View style={styles.container}>
+          <LinearGradient
+            colors={['#00BFFF', '#1E90FF', '#0047AB']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.loadingGradient}
+          >
+            <View style={styles.loadingContainer}>
+              <LinearGradient
+                colors={['rgba(255,255,255,0.3)', 'rgba(255,255,255,0.1)']}
+                style={styles.loadingCard}
+              >
+                <ActivityIndicator size="large" color="#fff" />
+                <Text style={styles.loadingText}>Motor Pool Drone System</Text>
+                <Text style={styles.loadingSubtext}>Loading Dashboard Data...</Text>
+              </LinearGradient>
+            </View>
+          </LinearGradient>
+        </View>
+      </AppLayout>
     );
   }
 
-  // Render Upload Screen - FULL MOCKUP (PERSIS seperti upload-menu.png)
-  if (activeMenu === 'upload') {
-    return <UploadMockup session={session} setActiveMenu={setActiveMenu} setSession={setSession} />;
-  }
-
-  // Render Cases Screen - FULL MOCKUP (PERSIS seperti cases-menu.png)
-  if (activeMenu === 'cases') {
-    return <CasesMockup session={session} setActiveMenu={setActiveMenu} setSession={setSession} />;
-  }
-
-  // Render Monitoring Screen - FULL MOCKUP (PERSIS seperti monitoring-menu.png)
-  if (activeMenu === 'monitoring') {
-    return <MonitoringMockup session={session} setActiveMenu={setActiveMenu} setSession={setSession} />;
-  }
-
-  // Render Documentations Screen - WebView
-  if (activeMenu === 'documentations') {
-    return <DocumentationsScreen session={session} setActiveMenu={setActiveMenu} setSession={setSession} />;
-  }
-
-  // Render Dashboard - Enhanced Dashboard dengan Charts (mengikuti Flutter)
-  return <DashboardComplete session={session} setActiveMenu={setActiveMenu} setSession={setSession} />;
+  return (
+    <AppLayout
+      session={session}
+      setSession={setSession}
+      activeMenu={activeMenu}
+      onChangeMenu={handleChangeMenu}
+      title={layoutTitle}
+      subtitle={layoutSubtitle}
+    >
+      {renderContent()}
+    </AppLayout>
+  );
 }
 
 const styles = StyleSheet.create({

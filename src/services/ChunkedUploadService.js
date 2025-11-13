@@ -59,7 +59,7 @@ export class ChunkedUploadService {
       // Track upload progress
       xhr.upload.addEventListener('progress', (event) => {
         if (event.lengthComputable && onProgress) {
-          const percentComplete = Math.round((event.loaded / event.total) * 100);
+          const percentComplete = Math.min(Math.round((event.loaded / event.total) * 100), 100);
           onProgress(percentComplete);
         }
       });
@@ -164,7 +164,7 @@ export class ChunkedUploadService {
       // Track upload progress
       xhr.upload.addEventListener('progress', (event) => {
         if (event.lengthComputable && onProgress) {
-          const percentComplete = Math.round((event.loaded / event.total) * 100);
+          const percentComplete = Math.min(Math.round((event.loaded / event.total) * 100), 100);
           onProgress(percentComplete);
         }
       });
@@ -415,5 +415,5 @@ export class ChunkedUploadService {
   }
 }
 
-// Singleton instance - Use DEVELOPMENT for testing (change to true for production APK build)
-export default new ChunkedUploadService(false);
+// Singleton instance - production environment
+export default new ChunkedUploadService(true);

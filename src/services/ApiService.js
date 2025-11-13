@@ -40,6 +40,8 @@ export class ApiService {
       dashboardBDPerBlock: '/cases/case/dashboard/bird_drops_by_block',
       mailReport: '/cases/case/mail/notifications',
       exportDashboard: '/cases/case/dashboard/export',
+      weather: '/weather/current',
+      uploadDetails: '/cases/api/UploadDetails',
     };
   }
 
@@ -115,15 +117,33 @@ export class ApiService {
                                      (lowerText.includes('expired') && lowerText.includes('session')) ||
                                      lowerText.includes('unauthorized');
 
+        // Generate user-friendly error message based on status code
+        let userMessage = 'Invalid response from server';
+
+        if (looksLikeHtml) {
+          // HTML response - likely a gateway/proxy error
+          if (response.status === 502) {
+            userMessage = 'Bad Gateway: The server is temporarily unavailable. Please try again in a few moments.';
+          } else if (response.status === 503) {
+            userMessage = 'Service Unavailable: The server is under maintenance. Please try again later.';
+          } else if (response.status === 504) {
+            userMessage = 'Gateway Timeout: The server took too long to respond. Please check your connection.';
+          } else if (response.status === 500) {
+            userMessage = 'Internal Server Error: Something went wrong on the server. Please contact support.';
+          } else {
+            userMessage = 'Server returned HTML instead of JSON. Please check your connection and endpoint configuration.';
+          }
+        } else if (hintsSessionMessage) {
+          userMessage = 'Session invalid or expired. Please login again.';
+        } else if (responseText.length > 0) {
+          userMessage = responseText.length > 200 ? `${responseText.substring(0, 200)}...` : responseText;
+        }
+
         // Return formatted error response
         return {
           success: false,
           status_code: response.status,
-          message: looksLikeHtml
-            ? 'Server returned HTML instead of JSON. Please check your connection and endpoint configuration.'
-            : hintsSessionMessage
-            ? 'Session invalid or expired. Please login again.'
-            : (responseText.length > 200 ? `${responseText.substring(0, 200)}...` : responseText) || 'Invalid response from server',
+          message: userMessage,
           data: null,
         };
       }
@@ -155,6 +175,30 @@ export class ApiService {
       return data;
     } catch (error) {
       console.error('[API] Error:', error);
+
+      // Check if it's a network error
+      if (error.message === 'Network request failed' || error.message.includes('fetch')) {
+        console.error('[API] Network error detected');
+        return {
+          success: false,
+          status_code: 0,
+          message: 'Network connection failed. Please check your internet connection and try again.',
+          data: null,
+        };
+      }
+
+      // Check if it's a timeout error
+      if (error.message && error.message.toLowerCase().includes('timeout')) {
+        console.error('[API] Timeout error detected');
+        return {
+          success: false,
+          status_code: 408,
+          message: 'Request timed out. The server is taking too long to respond.',
+          data: null,
+        };
+      }
+
+      // For other errors, re-throw
       throw error;
     }
   }
@@ -212,12 +256,12 @@ export class ApiService {
   }
 
   // Authentication APIs - exact match with Flutter main_api.dart
-  async login(email, password) {
+  async login(username, password) {
     const url = this.buildUrl(this.endpoints.authLogin);
     const data = await this.fetchData({
       method: 'POST',
       url,
-      body: { email, password },
+      body: { username, password },
       includeAuth: false,
     });
 
@@ -230,7 +274,33 @@ export class ApiService {
 
       // Store full login response for accessing userId later (needed for chunked upload)
       await AsyncStorage.setItem('login_response', JSON.stringify(data));
-      console.log(`[API] Login response stored, user_id: ${data.user_id}`);
+
+      // Store operator_id for filtering cases
+      if (data.operator_id) {
+        await AsyncStorage.setItem('operator_id', data.operator_id.toString());
+        console.log(`[API] Login response stored, user_id: ${data.user_id}, operator_id: ${data.operator_id}`);
+      } else {
+        console.log(`[API] Login response stored, user_id: ${data.user_id}`);
+      }
+
+      // Store upload_method and max_images_per_batch for dynamic upload configuration
+      if (data.upload_method) {
+        await AsyncStorage.setItem('upload_method', data.upload_method);
+        console.log(`[API] Upload method: ${data.upload_method}`);
+      } else {
+        // Default to chunking if not specified
+        await AsyncStorage.setItem('upload_method', 'chunking');
+        console.log(`[API] Upload method not specified, defaulting to: chunking`);
+      }
+
+      if (data.max_images_per_batch) {
+        await AsyncStorage.setItem('max_images_per_batch', data.max_images_per_batch.toString());
+        console.log(`[API] Max images per batch: ${data.max_images_per_batch}`);
+      } else {
+        // Default to 8 if not specified
+        await AsyncStorage.setItem('max_images_per_batch', '8');
+        console.log(`[API] Max images per batch not specified, defaulting to: 8`);
+      }
     }
 
     return data;
@@ -250,14 +320,17 @@ export class ApiService {
     } finally {
       this.accessToken = null;
       this.refreshToken = null;
-      // Clear ALL session-related keys
+      // Clear ALL session-related keys including operator_id, upload_method, and max_images_per_batch
       await AsyncStorage.multiRemove([
         'access_token',
         'refresh_token',
         'drone_data',
         'session_data',
         'logged_in_time',
-        'login_response'
+        'login_response',
+        'operator_id',
+        'upload_method',
+        'max_images_per_batch'
       ]);
       console.log('[API] Logout complete - all session data cleared');
     }
@@ -274,6 +347,15 @@ export class ApiService {
 
     if (filterAreaCode) {
       query['filters[areaCode]'] = filterAreaCode;
+    }
+
+    // Add operator_id filter from AsyncStorage
+    const operatorId = await AsyncStorage.getItem('operator_id');
+    if (operatorId) {
+      query['filters[areaId]'] = operatorId;
+      console.log(`[API] getCaseList: Filtering by operator_id (areaId): ${operatorId}`);
+    } else {
+      console.log('[API] getCaseList: No operator_id found, fetching all cases');
     }
 
     const url = this.buildUrl(this.endpoints.caseList, query);
@@ -410,6 +492,15 @@ export class ApiService {
       method: 'POST',
       url,
       body: { type },
+    });
+  }
+
+  async getWeather(latitude, longitude) {
+    const url = this.buildUrl(this.endpoints.weather, { latitude, longitude });
+    return this.fetchData({
+      method: 'GET',
+      url,
+      includeAuth: false,
     });
   }
 
@@ -594,7 +685,98 @@ export class ApiService {
       },
     };
   }
+
+  /**
+   * GET Upload Details by date
+   * @param {string} createdAt - Date in YYYY-MM-DD format
+   * @returns {Promise<Object>} Upload details response
+   */
+  async getUploadDetails(createdAt) {
+    const url = `https://${this.baseUrl}/services${this.endpoints.uploadDetails}?createdAt=${createdAt}`;
+
+    console.log(`[API] GET ${url}`);
+
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: this.getHeaders(),
+      });
+
+      const data = await response.json();
+      console.log(`[API] Response:`, data);
+
+      if (data.success) {
+        return {
+          success: true,
+          data: data.data || [],
+          message: data.message,
+        };
+      } else {
+        return {
+          success: false,
+          data: [],
+          message: data.message || 'Failed to fetch upload details',
+        };
+      }
+    } catch (error) {
+      console.error(`[API] GET Upload Details error:`, error);
+      return {
+        success: false,
+        data: [],
+        message: error.message,
+      };
+    }
+  }
+
+  /**
+   * POST Upload Details - Start upload session
+   * @param {Object} uploadData - Upload session data
+   * @param {string} uploadData.operator - Operator name (drone_code)
+   * @param {string} uploadData.status - Upload status ('active')
+   * @param {number} uploadData.startUploads - Total files to upload
+   * @param {number} uploadData.endUploads - Files completed (0 at start)
+   * @param {Array<string>} uploadData.areaHandle - Area codes array
+   * @returns {Promise<Object>} Upload details response
+   */
+  async createUploadDetails(uploadData) {
+    const url = `https://${this.baseUrl}/services${this.endpoints.uploadDetails}`;
+
+    console.log(`[API] POST ${url}`);
+    console.log(`[API] Payload:`, uploadData);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify(uploadData),
+      });
+
+      const data = await response.json();
+      console.log(`[API] Response:`, data);
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: data.data || {},
+          message: data.message || 'Upload session created successfully',
+        };
+      } else {
+        return {
+          success: false,
+          data: null,
+          message: data.message || 'Failed to create upload session',
+        };
+      }
+    } catch (error) {
+      console.error(`[API] POST Upload Details error:`, error);
+      return {
+        success: false,
+        data: null,
+        message: error.message,
+      };
+    }
+  }
 }
 
-// Singleton instance - Use DEVELOPMENT for testing (change to true for production APK build)
-export default new ApiService(false);
+// Singleton instance - production environment
+export default new ApiService(true);

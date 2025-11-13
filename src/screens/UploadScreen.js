@@ -12,18 +12,18 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import * as DocumentPicker from 'expo-document-picker';
-import chunkedUploadService from '../services/ChunkedUploadService';
-
-// Configuration untuk batch size (bisa diubah secara programmatic)
-const UPLOAD_CONFIG = {
-  BATCH_SIZE: 8, // Optimized untuk large images (6-12MB per image)
-  MAX_IMAGES: 500, // Increased untuk support bulk upload (support 400+ images)
-};
-// Updated with menu bar and fixed image picker
+import uploadStrategyService from '../services/UploadStrategyService';
+import { addUploadBatch } from '../utils/uploadSessionStorage';
+import apiService from '../services/ApiService';
 
 const { width } = Dimensions.get('window');
 
 export default function UploadScreen({ session, setSession, activeMenu, setActiveMenu, isDarkMode }) {
+  // Dynamic upload configuration from login response
+  const [uploadMethod, setUploadMethod] = useState('chunking');
+  const [batchSize, setBatchSize] = useState(8);
+  const [uploadMethodDisplay, setUploadMethodDisplay] = useState('Batch Upload');
+
   const [selectedImages, setSelectedImages] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({});
@@ -37,6 +37,27 @@ export default function UploadScreen({ session, setSession, activeMenu, setActiv
   const [overallProgress, setOverallProgress] = useState(0);
   const [uploadedCount, setUploadedCount] = useState(0);
   const [currentUploadingFile, setCurrentUploadingFile] = useState(null);
+
+  // Initialize upload strategy on mount
+  useEffect(() => {
+    const initUploadStrategy = async () => {
+      await uploadStrategyService.init();
+      const method = uploadStrategyService.getUploadMethod();
+      const maxBatch = uploadStrategyService.getMaxImagesPerBatch();
+      const display = uploadStrategyService.getUploadMethodDisplayName();
+
+      setUploadMethod(method);
+      setBatchSize(maxBatch);
+      setUploadMethodDisplay(display);
+
+      console.log('[UploadScreen] Upload strategy initialized:');
+      console.log(`[UploadScreen] - Method: ${method}`);
+      console.log(`[UploadScreen] - Batch size: ${maxBatch}`);
+      console.log(`[UploadScreen] - Display: ${display}`);
+    };
+
+    initUploadStrategy();
+  }, []);
 
   // Update time every second
   useEffect(() => {
@@ -169,15 +190,41 @@ export default function UploadScreen({ session, setSession, activeMenu, setActiv
     setUploadedCount(0);
     setOverallProgress(0);
 
-    // Calculate total batches
-    const totalBatchesCount = Math.ceil(selectedImages.length / UPLOAD_CONFIG.BATCH_SIZE);
+    // Calculate total batches using dynamic batch size
+    const totalBatchesCount = Math.ceil(selectedImages.length / batchSize);
     setTotalBatches(totalBatchesCount);
 
+    console.log(`[UploadScreen] Starting upload with method: ${uploadMethod}, batch size: ${batchSize}`);
+
+    // Create upload session in API BEFORE upload starts
     try {
-      // Use ChunkedUploadService with Flutter-like chunked upload
-      const result = await chunkedUploadService.uploadBatch(
+      const uploadData = {
+        operator: session?.drone?.drone_code || 'Unknown',
+        status: 'active',
+        startUploads: selectedImages.length, // Use total selected images, not result.summary.success
+        endUploads: 0,
+        areaHandle: session?.area_code || [],
+      };
+
+      console.log('[UploadScreen] Creating upload session in API BEFORE upload:', uploadData);
+
+      const apiResponse = await apiService.createUploadDetails(uploadData);
+
+      if (apiResponse.success) {
+        console.log('[UploadScreen] ✅ Upload session created in API:', apiResponse.data);
+      } else {
+        console.warn('[UploadScreen] ⚠️ Failed to create API session:', apiResponse.message);
+        // Continue with upload even if API call fails
+      }
+    } catch (error) {
+      console.error('[UploadScreen] ❌ API session creation error:', error);
+      // Continue with upload even if API call fails
+    }
+
+    try {
+      // Use UploadStrategyService - automatically switches between chunking and direct
+      const result = await uploadStrategyService.uploadBatch(
         selectedImages,
-        UPLOAD_CONFIG.BATCH_SIZE,
         // Batch progress callback
         (batchInfo) => {
           console.log(`[Upload] Batch ${batchInfo.currentBatch}/${batchInfo.totalBatches}`);
@@ -186,8 +233,8 @@ export default function UploadScreen({ session, setSession, activeMenu, setActiv
 
           // Update current batch files for UI display
           const batchFiles = selectedImages.slice(
-            (batchInfo.currentBatch - 1) * UPLOAD_CONFIG.BATCH_SIZE,
-            batchInfo.currentBatch * UPLOAD_CONFIG.BATCH_SIZE
+            (batchInfo.currentBatch - 1) * batchSize,
+            batchInfo.currentBatch * batchSize
           );
           setCurrentBatchFiles(batchFiles);
         },
@@ -255,16 +302,29 @@ export default function UploadScreen({ session, setSession, activeMenu, setActiv
       setUploadedCount(finalUploaded);
       setOverallProgress(100);
 
+      // Save upload batch to AsyncStorage for Monitoring tab tracking
+      try {
+        const droneCode = session?.drone?.drone_code || 'N/A';
+        await addUploadBatch(result.summary.success, droneCode);
+        console.log('[UploadScreen] Saved upload batch to AsyncStorage:', {
+          totalFiles: result.summary.success,
+          droneCode,
+        });
+      } catch (error) {
+        console.error('[UploadScreen] Failed to save upload batch:', error);
+        // Don't block user flow if storage fails
+      }
+
       // Show result
       if (result.success) {
         Alert.alert(
           'Upload Complete! ✅',
-          `Successfully uploaded ${result.summary.success} images!\n\nBatches completed: ${totalBatchesCount}`
+          `Successfully uploaded ${result.summary.success} images!\n\nBatches completed: ${totalBatchesCount}\n\nTrack progress in Monitoring tab.`
         );
       } else {
         Alert.alert(
           'Upload Partial Success ⚠️',
-          `Uploaded ${result.summary.success} of ${result.summary.total} images.\n${result.summary.error} failed.`
+          `Uploaded ${result.summary.success} of ${result.summary.total} images.\n${result.summary.error} failed.\n\nTrack progress in Monitoring tab.`
         );
       }
 
@@ -320,7 +380,7 @@ export default function UploadScreen({ session, setSession, activeMenu, setActiv
         style={styles.header}
       >
         <Text style={styles.headerTitle}>Upload Images</Text>
-        <Text style={styles.headerSubtitle}>Batch Upload - {UPLOAD_CONFIG.BATCH_SIZE} images per batch</Text>
+        <Text style={styles.headerSubtitle}>{uploadMethodDisplay} - {batchSize} images per batch</Text>
       </LinearGradient>
 
       {/* Side-by-Side Container: Menu Bar (Left) + DateTime (Right) */}
@@ -697,7 +757,7 @@ export default function UploadScreen({ session, setSession, activeMenu, setActiv
                     📸 {selectedImages.length} images selected
                   </Text>
                   <Text style={styles.selectedBatchText}>
-                    {Math.ceil(selectedImages.length / UPLOAD_CONFIG.BATCH_SIZE)} batches ({UPLOAD_CONFIG.BATCH_SIZE} per batch)
+                    {Math.ceil(selectedImages.length / batchSize)} batches ({batchSize} per batch)
                   </Text>
                 </View>
               )}
