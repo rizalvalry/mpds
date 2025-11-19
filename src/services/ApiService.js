@@ -275,12 +275,12 @@ export class ApiService {
       // Store full login response for accessing userId later (needed for chunked upload)
       await AsyncStorage.setItem('login_response', JSON.stringify(data));
 
-      // Store operator_id for filtering cases
-      if (data.operator_id) {
-        await AsyncStorage.setItem('operator_id', data.operator_id.toString());
-        console.log(`[API] Login response stored, user_id: ${data.user_id}, operator_id: ${data.operator_id}`);
+      // Store user_id as area_id for filtering cases (filters[areaId] in API)
+      if (data.user_id) {
+        await AsyncStorage.setItem('area_id', data.user_id.toString());
+        console.log(`[API] Login successful - user_id: ${data.user_id} stored as area_id for filtering`);
       } else {
-        console.log(`[API] Login response stored, user_id: ${data.user_id}`);
+        console.warn(`[API] Login response missing user_id!`);
       }
 
       // Store upload_method and max_images_per_batch for dynamic upload configuration
@@ -320,7 +320,7 @@ export class ApiService {
     } finally {
       this.accessToken = null;
       this.refreshToken = null;
-      // Clear ALL session-related keys including operator_id, upload_method, and max_images_per_batch
+      // Clear ALL session-related keys including area_id, upload_method, and max_images_per_batch
       await AsyncStorage.multiRemove([
         'access_token',
         'refresh_token',
@@ -328,7 +328,7 @@ export class ApiService {
         'session_data',
         'logged_in_time',
         'login_response',
-        'operator_id',
+        'area_id',
         'upload_method',
         'max_images_per_batch'
       ]);
@@ -620,16 +620,31 @@ export class ApiService {
     const query = {
       'paging[limit]': pageSize.toString(),
       'paging[page]': page.toString(),
-      'orders[date]': 'desc', // Default order by date descending
+      'orders[area]': 'desc', // Always order by area descending
     };
 
-    // Add area code filter if provided
+    // CRITICAL: filters[areaId] MUST ALWAYS be present (from user_id at login)
+    // This is the user's ID that backend uses to get accessible area_codes from users table
+    const areaId = await AsyncStorage.getItem('area_id');
+    if (adminAreaId) {
+      // Use explicit admin area ID if provided
+      query['filters[areaId]'] = adminAreaId.toString();
+      console.log(`[API] getCaseList: Using explicit adminAreaId: ${adminAreaId}`);
+    } else if (areaId) {
+      // Use user_id from login as areaId (this is ALWAYS required)
+      query['filters[areaId]'] = areaId;
+      console.log(`[API] getCaseList: Using user_id as areaId from session: ${areaId}`);
+    } else {
+      console.error(`[API] getCaseList: ERROR - No area_id found in session! User must login again.`);
+    }
+
+    // Add specific area code filter if provided (for filtering to specific area like "L")
+    // This is OPTIONAL and works together with filters[areaId]
     if (filterAreaCode) {
       query['filters[areaCode]'] = filterAreaCode;
-      query['orders[area]'] = 'asc'; // Add area order when filtering by area
+      console.log(`[API] getCaseList: Filtering by specific areaCode: ${filterAreaCode}`);
     } else {
-      // When no specific area filter, order by area ascending for better organization
-      query['orders[area]'] = 'asc';
+      console.log(`[API] getCaseList: Showing all areas accessible by user (no specific areaCode filter)`);
     }
 
     // Add isConfirmed filter if provided (true/false)
@@ -642,26 +657,13 @@ export class ApiService {
       query['filters[statusIds]'] = filterStatusIds.toString();
     }
 
-    // Add operator_id from session if available and no admin areaId is provided
-    // This ensures that when user clicks "All Areas", we use operator_id (areaId) from session
-    const operatorId = await AsyncStorage.getItem('operator_id');
-    if (adminAreaId) {
-      query['filters[areaId]'] = adminAreaId.toString();
-      console.log(`[API] getCaseList: Using explicit admin areaId: ${adminAreaId}`);
-    } else if (operatorId && !filterAreaCode) {
-      // Only apply operator_id filter when NO specific area code is selected
-      // This allows "All Areas" to show all areas accessible by the operator
-      query['filters[areaId]'] = operatorId;
-      console.log(`[API] getCaseList: Using operator_id (areaId) from session: ${operatorId}`);
-    }
-
     const url = this.buildUrl(this.endpoints.caseList, query);
-    console.log('[API] getCaseList - Sending request to:', url);
-    console.log('[API] getCaseList - Filters:', {
-      areaCode: filterAreaCode || 'none',
+    console.log('[API] getCaseList - Full URL:', url);
+    console.log('[API] getCaseList - All Filters:', {
+      areaId: query['filters[areaId]'] || 'MISSING!',
+      areaCode: filterAreaCode || 'all areas',
       isConfirmed: filterIsConfirmed !== null ? filterIsConfirmed : 'none',
       statusIds: filterStatusIds || 'none',
-      areaId: query['filters[areaId]'] || 'none',
     });
 
     const response = await this.fetchData({ method: 'GET', url });
