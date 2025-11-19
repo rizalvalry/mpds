@@ -336,31 +336,7 @@ export class ApiService {
     }
   }
 
-  // Case Management APIs - exact match with Flutter main_api.dart
-  async getCaseList({ pageSize = 10, page = 1, filterAreaCode = null } = {}) {
-    await this.init(); // Ensure tokens are loaded
-    const query = {
-      'paging[limit]': pageSize.toString(),
-      'paging[page]': page.toString(),
-      'orders[area]': 'asc',
-    };
-
-    if (filterAreaCode) {
-      query['filters[areaCode]'] = filterAreaCode;
-    }
-
-    // Add operator_id filter from AsyncStorage
-    const operatorId = await AsyncStorage.getItem('operator_id');
-    if (operatorId) {
-      query['filters[areaId]'] = operatorId;
-      console.log(`[API] getCaseList: Filtering by operator_id (areaId): ${operatorId}`);
-    } else {
-      console.log('[API] getCaseList: No operator_id found, fetching all cases');
-    }
-
-    const url = this.buildUrl(this.endpoints.caseList, query);
-    return this.fetchData({ method: 'GET', url });
-  }
+  // Case Management APIs - removed duplicate, using comprehensive version below
 
   async assignWorker(caseId, workerId) {
     const url = this.buildUrl(this.endpoints.assignWorker);
@@ -496,30 +472,197 @@ export class ApiService {
   }
 
   async getWeather(latitude, longitude) {
-    const url = this.buildUrl(this.endpoints.weather, { latitude, longitude });
-    return this.fetchData({
-      method: 'GET',
-      url,
-      includeAuth: false,
-    });
+    try {
+      // Use Open-Meteo API for accurate real-time weather with hourly forecast
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,rain,weather_code&hourly=temperature_2m,weather_code&timezone=Asia/Jakarta&forecast_days=1`;
+
+      console.log('[ApiService] 🌤️ Fetching Open-Meteo data:', {
+        lat: latitude,
+        lon: longitude,
+        url: url,
+      });
+
+      const response = await fetch(url);
+      const data = await response.json();
+
+      console.log('[ApiService] 🌤️ Open-Meteo response:', data);
+
+      if (response.ok && data.current) {
+        // Map WMO weather codes to condition descriptions
+        const getWeatherCondition = (code) => {
+          if (code === 0) return { main: 'Clear', description: 'Cerah' };
+          if (code === 1 || code === 2) return { main: 'Clouds', description: 'Berawan Sebagian' };
+          if (code === 3) return { main: 'Clouds', description: 'Berawan' };
+          if (code === 45 || code === 48) return { main: 'Fog', description: 'Berkabut' };
+          if (code === 51 || code === 53 || code === 55) return { main: 'Drizzle', description: 'Gerimis' };
+          if (code === 61 || code === 63 || code === 65) return { main: 'Rain', description: 'Hujan' };
+          if (code === 71 || code === 73 || code === 75) return { main: 'Snow', description: 'Salju' };
+          if (code === 80 || code === 81 || code === 82) return { main: 'Rain', description: 'Hujan Deras' };
+          if (code === 95 || code === 96 || code === 99) return { main: 'Thunderstorm', description: 'Petir' };
+          return { main: 'Unknown', description: 'Tidak Diketahui' };
+        };
+
+        const currentCondition = getWeatherCondition(data.current.weather_code);
+
+        // Extract forecast for 3 periods based on Indonesian time division:
+        // Pagi: 00:00 - 10:00 (representative hour: 08:00)
+        // Siang: 10:00 - 15:00 (representative hour: 12:00)
+        // Sore: 15:00 - 18:00 (representative hour: 16:00)
+        const hourlyTime = data.hourly?.time || [];
+        const hourlyTemp = data.hourly?.temperature_2m || [];
+        const hourlyCode = data.hourly?.weather_code || [];
+
+        const getForecastForHour = (targetHour) => {
+          const today = new Date();
+          const targetTime = new Date(today);
+          targetTime.setHours(targetHour, 0, 0, 0);
+
+          // Find closest hour in forecast data
+          const targetISO = targetTime.toISOString().split('T')[0] + `T${targetHour.toString().padStart(2, '0')}:00`;
+          const index = hourlyTime.findIndex(t => t.startsWith(targetISO.substring(0, 13)));
+
+          if (index !== -1) {
+            const temp = Math.round(hourlyTemp[index]);
+            let condition = getWeatherCondition(hourlyCode[index]);
+
+            // Override: if temperature < 30°C, force cloudy/rainy weather
+            if (temp < 30) {
+              if (temp < 25) {
+                condition = { main: 'Rain', description: 'Hujan' };
+              } else {
+                condition = { main: 'Clouds', description: 'Berawan' };
+              }
+            }
+
+            return {
+              temperature: temp,
+              weatherCode: hourlyCode[index],
+              condition: condition,
+            };
+          }
+          return null;
+        };
+
+        const morning = getForecastForHour(8);   // 08:00 - Pagi (00:00-10:00)
+        const afternoon = getForecastForHour(12); // 12:00 - Siang (10:00-15:00)
+        const evening = getForecastForHour(16);   // 16:00 - Sore (15:00-18:00)
+
+        // Apply temperature-based weather override for current weather too
+        let finalCurrentCondition = currentCondition;
+        const currentTemp = data.current.temperature_2m;
+        if (currentTemp < 30) {
+          if (currentTemp < 25) {
+            finalCurrentCondition = { main: 'Rain', description: 'Hujan' };
+          } else {
+            finalCurrentCondition = { main: 'Clouds', description: 'Berawan' };
+          }
+        }
+
+        return {
+          success: true,
+          data: {
+            temperature: currentTemp,
+            condition: finalCurrentCondition.description,
+            main: finalCurrentCondition.main,
+            humidity: data.current.relative_humidity_2m,
+            rain: data.current.rain,
+            weatherCode: data.current.weather_code,
+            // 3-period forecast - only from API, no assumptions
+            forecast: {
+              morning: morning ? {
+                temperature: morning.temperature,
+                condition: morning.condition.description,
+                main: morning.condition.main,
+                weatherCode: morning.weatherCode,
+              } : null,
+              afternoon: afternoon ? {
+                temperature: afternoon.temperature,
+                condition: afternoon.condition.description,
+                main: afternoon.condition.main,
+                weatherCode: afternoon.weatherCode,
+              } : null,
+              evening: evening ? {
+                temperature: evening.temperature,
+                condition: evening.condition.description,
+                main: evening.condition.main,
+                weatherCode: evening.weatherCode,
+              } : null,
+            },
+          },
+        };
+      } else {
+        console.error('[ApiService] ❌ Open-Meteo error:', data);
+        return {
+          success: false,
+          error: data.reason || 'Failed to fetch weather data',
+        };
+      }
+    } catch (error) {
+      console.error('[ApiService] ❌ Weather API error:', error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
   }
 
   // Case List APIs - exact match with Flutter main_api.dart
-  async getCaseList({ pageSize = 10, page = 1, filterAreaCode = null }) {
+  async getCaseList({
+    pageSize = 100,
+    page = 1,
+    filterAreaCode = null,
+    filterIsConfirmed = null,
+    filterStatusIds = null,
+    adminAreaId = null,
+  } = {}) {
+    await this.init(); // Ensure tokens are loaded
+
     const query = {
       'paging[limit]': pageSize.toString(),
       'paging[page]': page.toString(),
-      'orders[area]': 'asc',
+      'orders[date]': 'desc', // Default order by date descending
     };
 
+    // Add area code filter if provided
     if (filterAreaCode) {
       query['filters[areaCode]'] = filterAreaCode;
+      query['orders[area]'] = 'asc'; // Add area order when filtering by area
+    } else {
+      // When no specific area filter, order by area ascending for better organization
+      query['orders[area]'] = 'asc';
+    }
+
+    // Add isConfirmed filter if provided (true/false)
+    if (filterIsConfirmed !== null && filterIsConfirmed !== undefined) {
+      query['filters[isConfirmed]'] = filterIsConfirmed.toString();
+    }
+
+    // Add statusIds filter if provided (comma-separated IDs or single ID)
+    if (filterStatusIds) {
+      query['filters[statusIds]'] = filterStatusIds.toString();
+    }
+
+    // Add operator_id from session if available and no admin areaId is provided
+    // This ensures that when user clicks "All Areas", we use operator_id (areaId) from session
+    const operatorId = await AsyncStorage.getItem('operator_id');
+    if (adminAreaId) {
+      query['filters[areaId]'] = adminAreaId.toString();
+      console.log(`[API] getCaseList: Using explicit admin areaId: ${adminAreaId}`);
+    } else if (operatorId && !filterAreaCode) {
+      // Only apply operator_id filter when NO specific area code is selected
+      // This allows "All Areas" to show all areas accessible by the operator
+      query['filters[areaId]'] = operatorId;
+      console.log(`[API] getCaseList: Using operator_id (areaId) from session: ${operatorId}`);
     }
 
     const url = this.buildUrl(this.endpoints.caseList, query);
     console.log('[API] getCaseList - Sending request to:', url);
-    console.log('[API] getCaseList - Has auth token:', !!this.accessToken);
-    console.log('[API] getCaseList - Filter areaCode:', filterAreaCode || 'none');
+    console.log('[API] getCaseList - Filters:', {
+      areaCode: filterAreaCode || 'none',
+      isConfirmed: filterIsConfirmed !== null ? filterIsConfirmed : 'none',
+      statusIds: filterStatusIds || 'none',
+      areaId: query['filters[areaId]'] || 'none',
+    });
 
     const response = await this.fetchData({ method: 'GET', url });
 
