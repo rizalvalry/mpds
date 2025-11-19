@@ -159,20 +159,26 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
         // adminAreaId: removed - ApiService gets it from AsyncStorage automatically
       });
 
-      console.log(`[CasesMockup] Loading page ${page}, Cases Response:`, response);
+      console.log(`[CasesMockup] ====== LOAD CASES RESPONSE ======`);
+      console.log(`[CasesMockup] Page: ${page}, Append: ${append}`);
+      console.log(`[CasesMockup] Response success: ${response.success}`);
+      console.log(`[CasesMockup] Data count: ${response.data?.length || 0}`);
       console.log('[CasesMockup] Active filters:', {
-        area: selectedArea || 'all areas',
+        area: selectedArea || 'all areas (null)',
         isConfirmed: filterIsConfirmed,
         statusId: filterStatus,
         note: 'areaId (user_id) is auto-added by ApiService from AsyncStorage',
       });
+      console.log(`[CasesMockup] ================================`);
 
       if (response.success && response.data) {
         if (append) {
           // Append new data to existing
+          console.log(`[CasesMockup] Appending ${response.data.length} cases to existing ${casesData.length} cases`);
           setCasesData(prev => [...prev, ...response.data]);
         } else {
           // Replace with fresh data
+          console.log(`[CasesMockup] Replacing all data with ${response.data.length} new cases`);
           setCasesData(response.data);
         }
 
@@ -384,14 +390,17 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
   };
 
   const applyAreaFilter = (areaCode) => {
+    console.log(`[CasesMockup] applyAreaFilter called with areaCode: ${areaCode}`);
     setSelectedArea(areaCode);
     setShowFilterModal(false);
-    // Data will reload because of useEffect dependency
+    // Data will reload because of useEffect dependency on selectedArea
   };
 
   const resetFilter = () => {
+    console.log('[CasesMockup] resetFilter called - setting selectedArea to null');
     setSelectedArea(null);
     setShowFilterModal(false);
+    // Data will reload because of useEffect dependency on selectedArea
   };
 
 
