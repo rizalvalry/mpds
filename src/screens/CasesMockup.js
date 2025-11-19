@@ -632,7 +632,7 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
               >
                 <Text style={{ fontSize: 14 }}>📍</Text>
                 <Text style={{ fontSize: 13, fontWeight: '500', color: '#374151' }}>
-                  {selectedArea && Array.isArray(areas) && areas.length > 0 ? areas.find(a => a.code === selectedArea)?.name || 'All Areas' : 'All Areas'}
+                  {selectedArea && Array.isArray(areas) && areas.length > 0 ? areas.find(a => a.area_code === selectedArea)?.name || 'All Areas' : 'All Areas'}
                 </Text>
                 <Text style={{ fontSize: 10, color: '#9CA3AF' }}>▼</Text>
               </TouchableOpacity>
@@ -1069,73 +1069,76 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
 
             {/* Area List */}
             <ScrollView style={{ maxHeight: 300 }} nestedScrollEnabled={true}>
-              {/* All Areas Option */}
-              <TouchableOpacity
-                key="all-areas"
-                onPress={resetFilter}
-                style={{
-                  paddingVertical: 14,
-                  paddingHorizontal: 16,
-                  borderRadius: 8,
-                  marginBottom: 8,
-                  backgroundColor: !selectedArea ? '#E0F2FE' : '#F9FAFB',
-                  borderWidth: !selectedArea ? 2 : 1,
-                  borderColor: !selectedArea ? '#0EA5E9' : '#E5E7EB',
-                  flexDirection: 'row',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <Text style={{
-                  fontSize: 16,
-                  fontWeight: !selectedArea ? '700' : '500',
-                  color: !selectedArea ? '#0EA5E9' : '#1F2937',
-                }}>
-                  All Areas
-                </Text>
-                {!selectedArea && (
-                  <Text style={{ fontSize: 18, color: '#0EA5E9' }}>✓</Text>
-                )}
-              </TouchableOpacity>
-
-              {/* Individual Areas */}
-              {Array.isArray(areas) && areas.length > 0 ? (
-                areas.map((area) => (
-                  <TouchableOpacity
-                    key={area.code}
-                    onPress={() => applyAreaFilter(area.code)}
-                    style={{
-                      paddingVertical: 14,
-                      paddingHorizontal: 16,
-                      borderRadius: 8,
-                      marginBottom: 8,
-                      backgroundColor: selectedArea === area.code ? '#E0F2FE' : '#F9FAFB',
-                      borderWidth: selectedArea === area.code ? 2 : 1,
-                      borderColor: selectedArea === area.code ? '#0EA5E9' : '#E5E7EB',
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Text style={{
-                      fontSize: 16,
-                      fontWeight: selectedArea === area.code ? '700' : '500',
-                      color: selectedArea === area.code ? '#0EA5E9' : '#1F2937',
-                    }}>
-                      {area.name}
-                    </Text>
-                    {selectedArea === area.code && (
-                      <Text style={{ fontSize: 18, color: '#0EA5E9' }}>✓</Text>
-                    )}
-                  </TouchableOpacity>
-                ))
-              ) : (
-                <View key="no-areas" style={{ paddingVertical: 20, alignItems: 'center' }}>
-                  <Text style={{ fontSize: 14, color: '#6B7280' }}>
-                    No areas available
+              {[
+                /* All Areas Option */
+                <TouchableOpacity
+                  key="all-areas"
+                  onPress={resetFilter}
+                  style={{
+                    paddingVertical: 14,
+                    paddingHorizontal: 16,
+                    borderRadius: 8,
+                    marginBottom: 8,
+                    backgroundColor: !selectedArea ? '#E0F2FE' : '#F9FAFB',
+                    borderWidth: !selectedArea ? 2 : 1,
+                    borderColor: !selectedArea ? '#0EA5E9' : '#E5E7EB',
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 16,
+                    fontWeight: !selectedArea ? '700' : '500',
+                    color: !selectedArea ? '#0EA5E9' : '#1F2937',
+                  }}>
+                    All Areas
                   </Text>
-                </View>
-              )}
+                  {!selectedArea && (
+                    <Text style={{ fontSize: 18, color: '#0EA5E9' }}>✓</Text>
+                  )}
+                </TouchableOpacity>,
+
+                /* Individual Areas */
+                ...(Array.isArray(areas) && areas.length > 0
+                  ? areas.map((area) => (
+                      <TouchableOpacity
+                        key={`area-${area.id}`}
+                        onPress={() => applyAreaFilter(area.area_code)}
+                        style={{
+                          paddingVertical: 14,
+                          paddingHorizontal: 16,
+                          borderRadius: 8,
+                          marginBottom: 8,
+                          backgroundColor: selectedArea === area.area_code ? '#E0F2FE' : '#F9FAFB',
+                          borderWidth: selectedArea === area.area_code ? 2 : 1,
+                          borderColor: selectedArea === area.area_code ? '#0EA5E9' : '#E5E7EB',
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Text style={{
+                          fontSize: 16,
+                          fontWeight: selectedArea === area.area_code ? '700' : '500',
+                          color: selectedArea === area.area_code ? '#0EA5E9' : '#1F2937',
+                        }}>
+                          {area.name}
+                        </Text>
+                        {selectedArea === area.area_code && (
+                          <Text style={{ fontSize: 18, color: '#0EA5E9' }}>✓</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))
+                  : [
+                      <View key="no-areas" style={{ paddingVertical: 20, alignItems: 'center' }}>
+                        <Text style={{ fontSize: 14, color: '#6B7280' }}>
+                          No areas available
+                        </Text>
+                      </View>
+                    ]
+                )
+              ]}
             </ScrollView>
 
             {/* Action Buttons */}
