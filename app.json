@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/droneai.jpg",
       "resizeMode": "cover",
-      "backgroundColor": "#0047AB"
+      "backgroundColor": "#00d9ff"
     },
     "ios": {
       "supportsTablet": true,

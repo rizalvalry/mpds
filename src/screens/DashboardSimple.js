@@ -18,7 +18,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../contexts/ThemeContext';
 import AppLayout from '../layouts/AppLayout';
 import apiService from '../services/ApiService';
-import UploadScreen from './UploadScreen';
 import CasesScreen from './CasesScreen';
 import MonitoringScreen from './MonitoringScreen';
 import UploadMockup from './UploadMockup';
@@ -26,6 +25,7 @@ import MonitoringMockup from './MonitoringMockup';
 import DocumentationsScreen from './DocumentationsScreen';
 import CasesMockup from './CasesMockup';
 import DashboardComplete from './DashboardComplete';
+import ActivityControlScreen from './ActivityControlScreen';
 
 const { width } = Dimensions.get('window');
 
@@ -51,6 +51,10 @@ export default function DashboardScreen({ session, setSession }) {
     monitoring: {
       title: 'Monitoring',
       subtitle: 'Upload Progress Tracking',
+    },
+    activitycontrol: {
+      title: 'Activity Control',
+      subtitle: 'AI-Powered Drone Activity Monitoring',
     },
     documentations: {
       title: 'Documentations',
@@ -289,6 +293,16 @@ export default function DashboardScreen({ session, setSession }) {
       case 'monitoring':
         return (
           <MonitoringMockup
+            session={session}
+            setSession={setSession}
+            setActiveMenu={handleChangeMenu}
+            embedded
+            onNavigate={handleChangeMenu}
+          />
+        );
+      case 'activitycontrol':
+        return (
+          <ActivityControlScreen
             session={session}
             setSession={setSession}
             setActiveMenu={handleChangeMenu}

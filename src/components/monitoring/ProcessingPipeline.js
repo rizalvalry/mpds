@@ -22,7 +22,7 @@ export const ProcessingPipeline = ({
     {
       id: 1,
       icon: '📁',
-      title: 'Input Folder',
+      title: 'Uploaded Image',
       subtitle: 'Files Received',
       count: inputCount,
       color: theme.info,
@@ -31,8 +31,8 @@ export const ProcessingPipeline = ({
     {
       id: 2,
       icon: '⚙️',
-      title: 'Processing',
-      subtitle: `${processingCount}/${queuedCount + processingCount}`,
+      title: 'In Progress',
+      subtitle: `${processingCount} files`,
       count: queuedCount,
       color: theme.warning,
       bgColor: theme.warningLight,
@@ -41,7 +41,7 @@ export const ProcessingPipeline = ({
     {
       id: 3,
       icon: '✅',
-      title: 'Complete',
+      title: 'Completed',
       subtitle: 'Successfully Processed',
       count: completedCount,
       color: theme.success,

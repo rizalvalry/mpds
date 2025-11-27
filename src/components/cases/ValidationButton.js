@@ -9,7 +9,11 @@ export default function ValidationButton({ statusName, onPress, hasWorker }) {
                              !statusLower.includes('false detection');
 
   if (!isValidationNeeded) {
-    return <View style={styles.placeholder}><Text style={styles.placeholderText}>-</Text></View>;
+    return (
+      <View style={[styles.button, styles.buttonValidated]}>
+        <Text style={styles.buttonText}>Validated</Text>
+      </View>
+    );
   }
 
   const handlePress = () => {
@@ -39,12 +43,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF9800',
     paddingVertical: 6,
     paddingHorizontal: 12,
-    borderRadius: 4,
+    borderRadius: 8,
     alignSelf: 'center',
     minWidth: 70,
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  buttonValidated: {
+    backgroundColor: '#00baff',
   },
   buttonText: {
     color: '#fff',

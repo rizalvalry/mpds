@@ -10,10 +10,10 @@ import { scale, scaleFontSize } from '../../utils/responsive';
 
 export const MockupNavigation = ({ activeTab, onTabChange }) => {
   const tabs = [
-    { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-    { id: 'upload', label: 'Upload', icon: '⬆️' },
-    { id: 'cases', label: 'Cases', icon: '📋' },
-    { id: 'monitoring', label: 'Monitoring', icon: '📹' },
+    { id: 'dashboard', label: 'Dashboard', icon: '' },
+    { id: 'upload', label: 'Upload', icon: '' },
+    { id: 'cases', label: 'Cases', icon: '' },
+    { id: 'monitoring', label: 'Monitoring', icon: '' },
   ];
 
   return (

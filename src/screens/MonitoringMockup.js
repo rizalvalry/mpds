@@ -1,532 +1,614 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Dimensions, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ScrollView,
+  Dimensions,
+  ActivityIndicator,
+  RefreshControl,
+  StyleSheet,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import azureBlobService from '../services/AzureBlobService';
-import DynamicHeader from '../components/shared/DynamicHeader';
+import { useTheme } from '../contexts/ThemeContext';
+import { getMonitoringPanelsData, getTodayStatistics } from '../utils/uploadSessionStorage';
+import pusherService from '../services/PusherService';
+import monitoringDataService from '../services/MonitoringDataService';
 
 const { width } = Dimensions.get('window');
 
-// Use real Azure data (credentials sudah diperbaiki)
-const USE_MOCK_DATA = false; // Set true jika ingin demo mode
-
-export default function MonitoringMockup({ session, setActiveMenu, setSession }) {
+export default function MonitoringMockup({
+  session,
+  setActiveMenu,
+  setSession,
+  embedded = false,
+  onNavigate,
+}) {
+  const [panelsData, setPanelsData] = useState({
+    inProgress: [],
+    completed: [],
+    totalUploaded: 0,
+    totalProcessed: 0,
+  });
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
-  const [isPaused, setIsPaused] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [pusherConnected, setPusherConnected] = useState(false);
+  const { theme } = useTheme();
 
+  // Refs to track component mount state and prevent memory leaks
+  const isMountedRef = useRef(true);
+  const pusherCallbackRef = useRef(null);
+
+  // Load data ONLY on initial mount - no auto-refresh polling
   useEffect(() => {
-    loadStats();
-    const interval = setInterval(() => {
-      if (!isPaused) {
-        loadStats();
-      }
-    }, 30000); // Update every 30 seconds
+    console.log('[MonitoringMockup] Component mounted, loading initial data...');
+    isMountedRef.current = true;
+    loadData();
 
-    return () => clearInterval(interval);
-  }, [isPaused]);
-
-  // Generate realistic mock data
-  const generateMockStats = () => {
-    // Simulate varying processing states
-    const scenarios = [
-      // Scenario 1: Active processing
-      { input: 45, queued: 28, processed: 156, detected: 142, undetected: 14 },
-      // Scenario 2: Almost complete
-      { input: 12, queued: 8, processed: 234, detected: 215, undetected: 19 },
-      // Scenario 3: Idle state
-      { input: 0, queued: 0, processed: 189, detected: 175, undetected: 14 },
-      // Scenario 4: Heavy load
-      { input: 128, queued: 96, processed: 89, detected: 78, undetected: 11 },
-      // Scenario 5: Low activity
-      { input: 5, queued: 3, processed: 67, detected: 61, undetected: 6 },
-    ];
-
-    // Rotate through scenarios or pick random
-    const scenarioIndex = Math.floor(Date.now() / 60000) % scenarios.length; // Change every minute
-    const mockData = scenarios[scenarioIndex];
-
-    return {
-      ...mockData,
-      total: mockData.input + mockData.queued + mockData.processed,
-      timestamp: new Date().toISOString(),
+    return () => {
+      console.log('[MonitoringMockup] Component unmounting, cleaning up...');
+      isMountedRef.current = false;
     };
-  };
+  }, []);
 
-  const loadStats = async () => {
-    try {
-      setLoading(true);
-      
-      let data;
-      if (USE_MOCK_DATA) {
-        // Use mock data (simulate network delay)
-        await new Promise(resolve => setTimeout(resolve, 500));
-        data = generateMockStats();
-        console.log('[Monitoring] Using mock data:', data);
-      } else {
-        // Use real Azure Blob Storage data
-        console.log('[Monitoring] Fetching real Azure Blob Storage data...');
-        data = await azureBlobService.getAllStats();
-        console.log('[Monitoring] Azure data received:', data);
+  // Setup Pusher connection for real-time updates (no polling)
+  useEffect(() => {
+    console.log('[MonitoringMockup] Setting up Pusher connection...');
+
+    const handleFileDetected = (data) => {
+      // Only update if component is still mounted
+      if (!isMountedRef.current) {
+        console.log('[MonitoringMockup] Component unmounted, ignoring Pusher event');
+        return;
       }
-      
-      setStats(data);
-      setLastUpdate(new Date());
+      console.log('[MonitoringMockup] File detected, refreshing data...', data);
+      loadData(false); // Refresh data without loading indicator
+    };
+
+    // Store callback reference for cleanup
+    pusherCallbackRef.current = handleFileDetected;
+
+    pusherService.connect(handleFileDetected);
+    setPusherConnected(pusherService.getConnectionStatus());
+
+    return () => {
+      console.log('[MonitoringMockup] Cleaning up Pusher connection...');
+      pusherService.disconnect();
+      pusherCallbackRef.current = null;
+    };
+  }, []);
+
+  // Load monitoring data with safety checks
+  const loadData = async (showLoading = true) => {
+    try {
+      // Safety check: don't execute if component is unmounted
+      if (!isMountedRef.current) {
+        console.log('[MonitoringMockup] Component unmounted, aborting loadData');
+        return;
+      }
+
+      if (showLoading) {
+        setLoading(true);
+      }
+
+      // Get area codes from session
+      const areaCodes = session?.area_code || [];
+
+      console.log('[MonitoringMockup] Session data:', {
+        hasSession: !!session,
+        droneCode: session?.drone?.drone_code,
+        areaCodes: areaCodes,
+        fullSession: session,
+      });
+
+      // Fetch from API first
+      const apiResponse = await monitoringDataService.fetchTodayUploads();
+
+      // Safety check before setState
+      if (!isMountedRef.current) {
+        console.log('[MonitoringMockup] Component unmounted during API call, aborting setState');
+        return;
+      }
+
+      if (apiResponse.success && apiResponse.data.length > 0) {
+        // Calculate panels data combining API + AsyncStorage
+        const panels = await monitoringDataService.calculatePanelsData(
+          apiResponse.data,
+          areaCodes
+        );
+
+        // Final safety check before setState
+        if (!isMountedRef.current) {
+          console.log('[MonitoringMockup] Component unmounted during calculation, aborting setState');
+          return;
+        }
+
+        setPanelsData(panels);
+
+        // Also get local statistics for backward compatibility
+        const statistics = await getTodayStatistics();
+
+        // Safety check before final setState
+        if (!isMountedRef.current) return;
+
+        setStats(statistics);
+        setLastUpdate(new Date());
+
+        console.log('[MonitoringMockup] Data loaded from API:', {
+          inProgress: panels.inProgress.length,
+          completed: panels.completed.length,
+          totalUploaded: panels.totalUploaded,
+          totalProcessed: panels.totalProcessed,
+          operator: panels.operator,
+        });
+      } else {
+        // No API data, fallback to local AsyncStorage only
+        console.log('[MonitoringMockup] No API data, using local storage only');
+
+        const [panels, statistics] = await Promise.all([
+          getMonitoringPanelsData(areaCodes),
+          getTodayStatistics(),
+        ]);
+
+        // Safety check before setState
+        if (!isMountedRef.current) {
+          console.log('[MonitoringMockup] Component unmounted, aborting setState');
+          return;
+        }
+
+        setPanelsData(panels);
+        setStats(statistics);
+        setLastUpdate(new Date());
+
+        console.log('[MonitoringMockup] Data loaded from local storage:', {
+          inProgress: panels.inProgress.length,
+          completed: panels.completed.length,
+          totalUploaded: panels.totalUploaded,
+          totalProcessed: panels.totalProcessed,
+        });
+      }
     } catch (error) {
-      console.error('[Monitoring] Error loading stats:', error);
-      console.error('[Monitoring] Error details:', error.message);
-      
-      // Fallback to mock data on error
-      console.log('[Monitoring] Falling back to mock data due to error');
-      const mockData = generateMockStats();
-      setStats(mockData);
-      setLastUpdate(new Date());
+      console.error('[MonitoringMockup] Error loading data:', error);
+      // Don't crash the app, just log the error
     } finally {
-      setLoading(false);
+      // Safety check before final setState
+      if (isMountedRef.current) {
+        if (showLoading) {
+          setLoading(false);
+        }
+        setRefreshing(false);
+      }
     }
   };
 
-  const getTimeAgo = () => {
-    if (!lastUpdate) return 'Never';
-    const seconds = Math.floor((new Date() - lastUpdate) / 1000);
-    if (seconds < 60) return `${seconds}s ago`;
-    const minutes = Math.floor(seconds / 60);
-    return `${minutes}m ago`;
+  // Handle pull-to-refresh
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadData(false);
   };
 
-  // Map Azure Blob stats to UI format
-  const inputCount = stats?.input || 0;
-  const queuedCount = stats?.queued || 0;
-  const processedCount = stats?.processed || 0;
-  const detectedCount = stats?.detected || 0;
-  const undetectedCount = stats?.undetected || 0;
-  const completedCount = detectedCount + undetectedCount;
-  
-  // Processing percentage based on completed output files
-  const totalFilesToday = processedCount > 0 ? processedCount : (detectedCount + undetectedCount);
-  const processingPercentage = totalFilesToday > 0 ? Math.round((completedCount / totalFilesToday) * 100) : 0;
-  
-  // System is complete if no files in queue and input
-  const isComplete = queuedCount === 0 && inputCount === 0 && completedCount > 0;
-  const isIdle = inputCount === 0 && queuedCount === 0 && completedCount === 0;
-  
-  console.log('[Monitoring] Display stats:', {
-    input: inputCount,
-    queued: queuedCount,
-    processed: processedCount,
-    detected: detectedCount,
-    undetected: undetectedCount,
-    completed: completedCount,
-    isComplete,
-    isIdle
-  });
+  // Render empty state
+  if (loading) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#0EA5E9" />
+          <Text style={[styles.loadingText, { color: theme.text }]}>Loading monitoring data...</Text>
+        </View>
+      </View>
+    );
+  }
 
-  return (
-    <View style={{ flex: 1, backgroundColor: '#F5F5F5' }}>
-      {/* Dynamic Header Component */}
-      <DynamicHeader
-        title="Monitoring"
-        subtitle="Azure Blob Storage File Monitoring"
-        session={session}
-        setSession={setSession}
-        onThemeToggle={(value) => setIsDarkMode(value)}
-        isDarkMode={isDarkMode}
-      />
-
-      {/* Navigation Bar */}
-      <View style={{
-        backgroundColor: '#FFFFFF',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-      }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={{ flexDirection: 'row', gap: 12, width }}>
-            <TouchableOpacity
-              onPress={() => setActiveMenu('dashboard')}
-              style={{
-                flex: 1,
-                paddingVertical: 12,
-                paddingHorizontal: 16,
-                borderRadius: 8,
-                backgroundColor: 'transparent',
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-              }}
-            >
-              <Text style={{ fontSize: 18 }}>📊</Text>
-              <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Dashboard</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => setActiveMenu('upload')}
-              style={{
-                flex: 1,
-                paddingVertical: 12,
-                paddingHorizontal: 16,
-                borderRadius: 8,
-                backgroundColor: 'transparent',
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-              }}
-            >
-              <Text style={{ fontSize: 18 }}>⬆️</Text>
-              <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Upload</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => setActiveMenu('cases')}
-              style={{
-                flex: 1,
-                paddingVertical: 12,
-                paddingHorizontal: 16,
-                borderRadius: 8,
-                backgroundColor: 'transparent',
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-              }}
-            >
-              <Text style={{ fontSize: 18 }}>📋</Text>
-              <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Cases</Text>
-            </TouchableOpacity>
-
-            <View style={{
-              flex: 1,
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              borderRadius: 8,
-              backgroundColor: '#0EA5E9',
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              shadowColor: '#0EA5E9',
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.3,
-              shadowRadius: 8,
-              elevation: 4,
-            }}>
-              <Text style={{ fontSize: 18 }}>📹</Text>
-              <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFFFFF' }}>Monitoring</Text>
+  // Render empty state only when no processed files from Pusher
+  // Don't check totalUploaded - use totalProcessed instead (from Pusher events)
+  if (panelsData.totalProcessed === 0 && panelsData.inProgress.length === 0 && panelsData.completed.length === 0) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <ScrollView
+          style={styles.scrollView}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyIcon}>⟳</Text>
+            <Text style={[styles.emptyTitle, { color: theme.text }]}>Waiting for Detection Events</Text>
+            <Text style={[styles.emptySubtitle, { color: theme.secondaryText }]}>
+              Monitoring real-time file detection from backend worker. Data will appear automatically when files are detected.
+            </Text>
+            <View style={styles.statusRow}>
+              <View style={[styles.statusDot, { backgroundColor: pusherConnected ? '#10B981' : '#EF4444' }]} />
+              <Text style={[styles.statusText, { color: theme.secondaryText }]}>
+                {pusherConnected ? 'Real-time updates active' : 'Reconnecting...'}
+              </Text>
             </View>
           </View>
-
-          <TouchableOpacity
-            onPress={() => setActiveMenu('documentations')}
-            style={{
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              borderRadius: 8,
-              backgroundColor: 'transparent',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              marginLeft: 12,
-            }}
-          >
-            <Text style={{ fontSize: 18 }}>📚</Text>
-            <Text style={{ fontSize: 14, fontWeight: '500', color: '#6B7280' }}>Documentations</Text>
-          </TouchableOpacity>
         </ScrollView>
       </View>
+    );
+  }
 
-      {/* Content */}
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24 }}>
-        {/* Mock Data Notice (if using mock data) */}
-        {/* {USE_MOCK_DATA && (
-          <View style={{
-            backgroundColor: '#FEF3C7',
-            borderRadius: 12,
-            padding: 12,
-            marginBottom: 16,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 12,
-            borderLeftWidth: 4,
-            borderLeftColor: '#F59E0B',
-          }}>
-            <Text style={{ fontSize: 20 }}>⚠️</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: '#92400E' }}>
-                Demo Mode - Using Mock Data
-              </Text>
-              <Text style={{ fontSize: 11, color: '#92400E', marginTop: 2 }}>
-                Real Azure Blob Storage monitoring requires proper authentication
-              </Text>
-            </View>
-          </View>
-        )} */}
+  // Calculate overall progress based on total processed / total uploaded
+  // This gives accurate percentage of files processed across all areas
+  const totalAreas = panelsData.inProgress.length + panelsData.completed.length;
+  const overallProgress = panelsData.totalUploaded > 0
+    ? Math.min(Math.round((panelsData.totalProcessed / panelsData.totalUploaded) * 100), 100)
+    : 0;
 
-        {/* Azure Blob Monitor Card */}
-        <View style={{
-          backgroundColor: '#FFFFFF',
-          borderRadius: 12,
-          padding: 20,
-          marginBottom: 16,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.1,
-          shadowRadius: 8,
-          elevation: 4,
-        }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={{
-                width: 48,
-                height: 48,
-                borderRadius: 24,
-                backgroundColor: USE_MOCK_DATA ? '#F59E0B' : '#0EA5E9',
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}>
-                <Text style={{ fontSize: 24 }}>{USE_MOCK_DATA ? '📊' : '☁️'}</Text>
-              </View>
-              <View>
-                {/* <Text style={{ fontSize: 14, color: USE_MOCK_DATA ? '#F59E0B' : '#0EA5E9' }}>
-                  {USE_MOCK_DATA ? 'Demo Monitoring Analytics' : 'Real-time Monitoring Analytics'}
-                </Text> */}
-              </View>
-            </View>
+  // Calculate queued (files still waiting to be processed)
+  const queued = Math.max(0, panelsData.totalUploaded - panelsData.totalProcessed);
 
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <TouchableOpacity
-                onPress={() => setIsPaused(!isPaused)}
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 20,
-                  backgroundColor: '#F3F4F6',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                }}
-              >
-                <Text style={{ fontSize: 18 }}>{isPaused ? '▶️' : '⏸️'}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={loadStats}
-                style={{
-                  paddingHorizontal: 16,
-                  paddingVertical: 8,
-                  borderRadius: 20,
-                  backgroundColor: '#E0F2FE',
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
-              >
-                <Text style={{ fontSize: 14 }}>🔄</Text>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#0EA5E9' }}>Refresh</Text>
-              </TouchableOpacity>
-            </View>
+  return (
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <ScrollView
+        style={styles.scrollView}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
+        {/* Summary Cards - 4 cards: UPLOADED, QUEUED, PROCESSED, PROGRESS */}
+        <View style={styles.summaryContainer}>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryIconMono}>↑</Text>
+            <Text style={styles.summaryValue}>{panelsData.totalUploaded}</Text>
+            <Text style={styles.summaryLabel}>UPLOADED</Text>
           </View>
 
-          <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 12 }}>
-            Last Update: {getTimeAgo()}
-          </Text>
-        </View>
+          <View style={styles.summaryCard}>
+            <Text style={[styles.summaryIconMono, { color: '#F59E0B' }]}>◔</Text>
+            <Text style={[styles.summaryValue, { color: '#F59E0B' }]}>{queued}</Text>
+            <Text style={styles.summaryLabel}>QUEUED</Text>
+          </View>
 
-        {/* Status Banner */}
-        <View style={{
-          backgroundColor: isComplete ? '#D1FAE5' : isIdle ? '#E5E7EB' : '#FEF3C7',
-          borderRadius: 12,
-          padding: 16,
-          marginBottom: 24,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 12,
-        }}>
-          <Text style={{ fontSize: 24 }}>
-            {isComplete ? '✅' : isIdle ? '💤' : '⚙️'}
-          </Text>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: isComplete ? '#065F46' : isIdle ? '#6B7280' : '#92400E' }}>
-              {isComplete ? 'ALL PROCESSING COMPLETE' : isIdle ? 'SYSTEM IDLE' : 'PROCESSING IN PROGRESS'}
-            </Text>
-            <Text style={{ fontSize: 13, color: isComplete ? '#065F46' : isIdle ? '#6B7280' : '#92400E', marginTop: 2 }}>
-              {isComplete ? `${completedCount} files processed today (${detectedCount} detected, ${undetectedCount} undetected)` : 
-               isIdle ? 'No files in queue or output folders' : 
-               `${inputCount} input, ${queuedCount} queued`}
-            </Text>
+          <View style={styles.summaryCard}>
+            <Text style={[styles.summaryIconMono, { color: '#10B981' }]}>✓</Text>
+            <Text style={[styles.summaryValue, { color: '#10B981' }]}>{panelsData.totalProcessed}</Text>
+            <Text style={styles.summaryLabel}>PROCESSED</Text>
+          </View>
+
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryIconMono}>%</Text>
+            <Text style={styles.summaryValue}>{overallProgress}%</Text>
+            <Text style={styles.summaryLabel}>PROGRESS</Text>
           </View>
         </View>
 
-        {/* Processing Pipeline */}
-        <Text style={{
-          fontSize: 14,
-          fontWeight: '600',
-          color: '#6B7280',
-          letterSpacing: 1.5,
-          marginBottom: 16,
-          textAlign: 'center',
-        }}>
-          PROCESSING PIPELINE
-        </Text>
-
-        <View style={{ flexDirection: width > 600 ? 'row' : 'column', gap: 16 }}>
-          {/* Stage 1: Input Folder */}
-          <View style={{
-            flex: 1,
-            backgroundColor: '#FFFFFF',
-            borderRadius: 12,
-            padding: 20,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.1,
-            shadowRadius: 8,
-            elevation: 4,
-          }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 12 }}>
-              <View style={{
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                backgroundColor: '#0EA5E9',
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}>
-                <Text style={{ fontSize: 18, fontWeight: '700', color: '#FFFFFF' }}>1</Text>
-              </View>
-              <View>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: '#1F2937' }}>Input Folder</Text>
-                <Text style={{ fontSize: 12, color: '#6B7280' }}>📁</Text>
-              </View>
-            </View>
-
-            <Text style={{ fontSize: 48, fontWeight: '700', color: '#1F2937', marginBottom: 4 }}>
-              {inputCount}
-            </Text>
-            <Text style={{ fontSize: 14, color: '#6B7280' }}>Files Queued</Text>
+        {/* Overall Progress Bar */}
+        <View style={styles.overallProgressContainer}>
+          <View style={styles.overallProgressHeader}>
+            <Text style={[styles.overallProgressTitle, { color: theme.text }]}>OVERALL PROGRESS</Text>
+            <Text style={[styles.overallProgressPercent, { color: theme.text }]}>{overallProgress}%</Text>
           </View>
+          <View style={styles.progressBarContainer}>
+            <View style={[styles.progressBarFill, { width: `${overallProgress}%` }]} />
+          </View>
+          <Text style={[styles.overallProgressSubtitle, { color: theme.secondaryText }]}>
+            {panelsData.totalProcessed}/{panelsData.totalUploaded} processed • {queued} queued • {totalAreas} area{totalAreas !== 1 ? 's' : ''}
+          </Text>
+        </View>
 
-          {/* Stage 2: Processing */}
-          <View style={{
-            flex: 1,
-            backgroundColor: '#FFFFFF',
-            borderRadius: 12,
-            padding: 20,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.1,
-            shadowRadius: 8,
-            elevation: 4,
-          }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 12 }}>
-              <View style={{
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                backgroundColor: '#0EA5E9',
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}>
-                <Text style={{ fontSize: 18, fontWeight: '700', color: '#FFFFFF' }}>2</Text>
-              </View>
-              <View>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: '#1F2937' }}>Processing</Text>
-                <Text style={{ fontSize: 12, color: '#6B7280' }}>⚙️</Text>
-              </View>
+        {/* 2-Panel Block Progress */}
+        <View style={styles.panelsContainer}>
+          {/* In Progress Panel */}
+          <View style={styles.panel}>
+            <View style={styles.panelHeader}>
+              <Text style={styles.panelIcon}>⏳</Text>
+              <Text style={styles.panelTitle}>IN PROGRESS</Text>
             </View>
-
-            <Text style={{ fontSize: 48, fontWeight: '700', color: '#1F2937', marginBottom: 4 }}>
-              {processedCount}
-            </Text>
-            <Text style={{ fontSize: 14, color: '#6B7280', marginBottom: 8 }}>Files Processed Today</Text>
-
-            {/* Progress Info */}
-            <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-            }}>
-              <View style={{
-                paddingHorizontal: 10,
-                paddingVertical: 4,
-                borderRadius: 8,
-                backgroundColor: '#E0F2FE',
-              }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: '#0369A1' }}>
-                  Processed
+            <View style={styles.panelContent}>
+              {panelsData.inProgress.length === 0 ? (
+                <Text style={[styles.emptyPanelText, { color: theme.secondaryText }]}>
+                  No blocks in progress
                 </Text>
-              </View>
-              <Text style={{ fontSize: 12, color: '#6B7280' }}>
-                → Output: {completedCount}
-              </Text>
+              ) : (
+                panelsData.inProgress.map((area, index) => {
+                  const blockQueued = Math.max(0, area.total - area.processed);
+                  return (
+                    <View key={index} style={styles.blockCard}>
+                      <View style={styles.blockHeader}>
+                        <Text style={styles.blockTitle}>Block {area.areaCode}</Text>
+                        <Text style={styles.blockCount}>
+                          {area.processed}/{area.total}
+                        </Text>
+                      </View>
+                      <View style={styles.blockProgressBar}>
+                        <View
+                          style={[
+                            styles.blockProgressFill,
+                            { width: `${area.progress}%`, backgroundColor: '#F59E0B' },
+                          ]}
+                        />
+                      </View>
+                      <View style={styles.blockFooter}>
+                        <Text style={styles.blockPercent}>{area.progress}%</Text>
+                        <Text style={styles.blockQueued}>{blockQueued} queued</Text>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
             </View>
           </View>
 
-          {/* Stage 3: Complete */}
-          <View style={{
-            flex: 1,
-            backgroundColor: '#FFFFFF',
-            borderRadius: 12,
-            padding: 20,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.1,
-            shadowRadius: 8,
-            elevation: 4,
-          }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 12 }}>
-              <View style={{
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                backgroundColor: '#0EA5E9',
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}>
-                <Text style={{ fontSize: 18, fontWeight: '700', color: '#FFFFFF' }}>3</Text>
-              </View>
-              <View>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: '#1F2937' }}>Complete</Text>
-                <Text style={{ fontSize: 12, color: '#6B7280' }}>✅</Text>
-              </View>
+          {/* Completed Panel */}
+          <View style={styles.panel}>
+            <View style={styles.panelHeader}>
+              <Text style={styles.panelIcon}>✅</Text>
+              <Text style={styles.panelTitle}>COMPLETED</Text>
             </View>
+            <View style={styles.panelContent}>
+              {panelsData.completed.length === 0 ? (
+                <Text style={[styles.emptyPanelText, { color: theme.secondaryText }]}>
+                  No blocks completed yet
+                </Text>
+              ) : (
+                panelsData.completed.map((area, index) => (
+                  <View key={index} style={styles.blockCard}>
+                    <View style={styles.blockHeader}>
+                      <Text style={styles.blockTitle}>Block {area.areaCode}</Text>
+                      <Text style={styles.blockCount}>
+                        {area.processed}/{area.total}
+                      </Text>
+                    </View>
+                    <View style={styles.blockProgressBar}>
+                      <View
+                        style={[
+                          styles.blockProgressFill,
+                          { width: '100%', backgroundColor: '#10B981' },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.blockPercent}>100%</Text>
+                  </View>
+                ))
+              )}
+            </View>
+          </View>
+        </View>
 
-            <Text style={{ fontSize: 48, fontWeight: '700', color: '#10B981', marginBottom: 4 }}>
-              {completedCount}
+        {/* Status Footer */}
+        <View style={styles.statusFooter}>
+          <View style={styles.statusRow}>
+            <View style={[styles.statusDot, { backgroundColor: pusherConnected ? '#10B981' : '#EF4444' }]} />
+            <Text style={[styles.statusText, { color: theme.secondaryText }]}>
+              {pusherConnected ? 'Real-time updates active' : 'Reconnecting...'}
             </Text>
-            <Text style={{ fontSize: 14, color: '#6B7280', marginBottom: 12 }}>Outputs Generated Today</Text>
-
-            {/* Breakdown */}
-            <View style={{ gap: 6 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: '#10B981',
-                }} />
-                <Text style={{ fontSize: 12, color: '#6B7280' }}>
-                  Detected: {detectedCount}
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: '#9CA3AF',
-                }} />
-                <Text style={{ fontSize: 12, color: '#6B7280' }}>
-                  Undetected: {undetectedCount}
-                </Text>
-              </View>
-            </View>
           </View>
         </View>
       </ScrollView>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 48,
+    minHeight: 400,
+  },
+  emptyIcon: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  summaryContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    gap: 12,
+  },
+  summaryCard: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  summaryIcon: {
+    fontSize: 28,
+    marginBottom: 8,
+  },
+  summaryIconMono: {
+    fontSize: 24,
+    fontWeight: '300',
+    color: '#0EA5E9',
+    marginBottom: 8,
+  },
+  summaryValue: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#0EA5E9',
+    marginBottom: 4,
+  },
+  summaryLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    letterSpacing: 0.5,
+  },
+  overallProgressContainer: {
+    margin: 24,
+    padding: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  overallProgressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  overallProgressTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  overallProgressPercent: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#0EA5E9',
+  },
+  progressBarContainer: {
+    height: 12,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 6,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#0EA5E9',
+    borderRadius: 6,
+  },
+  overallProgressSubtitle: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  panelsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    gap: 12,
+  },
+  panel: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  panelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    backgroundColor: '#F8FAFC',
+    gap: 8,
+  },
+  panelIcon: {
+    fontSize: 20,
+  },
+  panelTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#475569',
+    letterSpacing: 0.5,
+  },
+  panelContent: {
+    padding: 16,
+    gap: 12,
+  },
+  emptyPanelText: {
+    fontSize: 13,
+    fontWeight: '500',
+    textAlign: 'center',
+    paddingVertical: 24,
+  },
+  blockCard: {
+    padding: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+  },
+  blockHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  blockTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  blockCount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  blockProgressBar: {
+    height: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 6,
+  },
+  blockProgressFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  blockPercent: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  blockFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  blockQueued: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#F59E0B',
+  },
+  statusFooter: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    alignItems: 'center',
+    gap: 8,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+});

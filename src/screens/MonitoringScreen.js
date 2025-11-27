@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,25 +12,21 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import azureBlobService from '../services/AzureBlobService';
 
 const { width } = Dimensions.get('window');
 
+// TODO: Replace with actual API calls when endpoints are ready
+const API_BASE_URL = 'https://droneark.bsi.co.id/api';
+
 export default function MonitoringScreen({ session, setSession, activeMenu, setActiveMenu, isDarkMode }) {
-  const [stats, setStats] = useState({
-    input: 0,
-    queued: 0,
-    processed: 0,
-    detected: 0,
-    undetected: 0,
-    total: 0,
-    timestamp: null
+  const [blockProgress, setBlockProgress] = useState({
+    inProgress: [], // [{ area: 'A', processed: 17, total: 300 }]
+    complete: [],   // [{ area: 'B', processed: 250, total: 250 }]
   });
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [pulseAnim] = useState(new Animated.Value(1));
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdateTime, setLastUpdateTime] = useState(null);
 
   // Theme
@@ -39,6 +35,11 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
     text: isDarkMode ? '#fff' : '#0047AB',
     card: isDarkMode ? 'rgba(30, 144, 255, 0.1)' : 'rgba(255, 255, 255, 0.8)',
   };
+
+  // Get area codes from session (from login response)
+  const userAreaCodes = session?.area_code || [];
+  const droneCode = session?.drone?.drone_code || 'N/A';
+  const username = session?.username || 'User';
 
   // Update time every second
   useEffect(() => {
@@ -71,67 +72,118 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
     }
   }, [loading]);
 
-  // Auto-refresh every 30 seconds if enabled
-  useEffect(() => {
-    let interval;
-    if (autoRefresh) {
-      interval = setInterval(() => {
-        fetchStats();
-      }, 30000); // 30 seconds
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [autoRefresh]);
-
-  // Initial load
+  // Initial load and auto-refresh every 10 seconds
   useEffect(() => {
     fetchStats();
+    const interval = setInterval(() => {
+      fetchStats();
+    }, 10000); // Refresh every 10 seconds
+
+    return () => clearInterval(interval);
   }, []);
 
-  // Fetch monitoring statistics
+  // Fetch monitoring statistics from API
   const fetchStats = async () => {
     try {
       setLoading(true);
-      console.log('[Monitoring] Fetching stats from Azure Blob Storage...');
+      console.log('[Monitoring] Fetching stats from API...');
 
-      const data = await azureBlobService.getAllStats();
+      // TODO: Replace with actual API call
+      // const response = await fetch(`${API_BASE_URL}/upload/today`, {
+      //   headers: {
+      //     'Authorization': `Bearer ${session?.session_token}`,
+      //   },
+      // });
+      // const data = await response.json();
 
-      setStats(data);
+      // MOCK DATA for testing (remove when API is ready)
+      const mockData = [
+        {
+          id: 1,
+          operator: 'DP003',
+          start_uploads: 530,
+          end_uploads: 0,
+          area_handle: ['C', 'D', 'K', 'L'],
+          status: 'in_progress',
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: 2,
+          operator: 'DP005',
+          start_uploads: 316,
+          end_uploads: 316,
+          area_handle: ['B', 'K'],
+          status: 'completed',
+          created_at: new Date().toISOString(),
+        },
+      ];
+
+      // Process data and calculate block progress
+      calculateBlockProgress(mockData);
       setLastUpdateTime(new Date());
-      console.log('[Monitoring] Stats updated:', data);
+
+      console.log('[Monitoring] Stats updated successfully');
     } catch (error) {
       console.error('[Monitoring] Error fetching stats:', error);
-      Alert.alert('Error', 'Failed to fetch monitoring data. Please try again.');
+      // Don't show alert on auto-refresh errors
+      if (refreshing) {
+        Alert.alert('Error', 'Failed to fetch monitoring data. Please try again.');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
+  // Calculate block progress from upload data
+  const calculateBlockProgress = (uploadData) => {
+    const inProgress = [];
+    const complete = [];
+    const areaMap = {}; // { 'C': { total: 530, processed: 17 } }
+
+    // Aggregate by area code
+    uploadData.forEach((upload) => {
+      upload.area_handle.forEach((area) => {
+        if (!areaMap[area]) {
+          areaMap[area] = {
+            total: 0,
+            processed: 0, // TODO: Get from Pusher or API
+          };
+        }
+        areaMap[area].total += upload.start_uploads;
+        // TODO: Add processed count from backend
+        // For now, mock some progress
+        areaMap[area].processed += Math.floor(upload.end_uploads / upload.area_handle.length);
+      });
+    });
+
+    // Split into In Progress and Complete
+    Object.entries(areaMap).forEach(([area, data]) => {
+      const blockData = {
+        area,
+        processed: data.processed,
+        total: data.total,
+      };
+
+      if (data.processed >= data.total && data.total > 0) {
+        complete.push(blockData);
+      } else {
+        inProgress.push(blockData);
+      }
+    });
+
+    // Sort by area code
+    inProgress.sort((a, b) => a.area.localeCompare(b.area));
+    complete.sort((a, b) => a.area.localeCompare(b.area));
+
+    setBlockProgress({ inProgress, complete });
+  };
+
   // Pull to refresh handler
-  const onRefresh = () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchStats();
-  };
-
-  // Toggle auto-refresh
-  const toggleAutoRefresh = () => {
-    setAutoRefresh(!autoRefresh);
-    Alert.alert(
-      'Auto-Refresh',
-      autoRefresh
-        ? 'Auto-refresh disabled'
-        : 'Auto-refresh enabled (every 30 seconds)',
-      [{ text: 'OK' }]
-    );
-  };
-
-  // Calculate processing status
-  const isProcessingComplete = stats.queued === 0;
-  const processingPercentage = stats.total > 0
-    ? Math.round((stats.processed / stats.total) * 100)
-    : 0;
+  }, []);
 
   // Format time ago
   const getTimeAgo = () => {
@@ -144,6 +196,13 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
     return `${hours}h ago`;
   };
 
+  // Calculate total stats
+  const totalUploaded = blockProgress.inProgress.reduce((sum, b) => sum + b.total, 0) +
+                       blockProgress.complete.reduce((sum, b) => sum + b.total, 0);
+  const totalProcessed = blockProgress.inProgress.reduce((sum, b) => sum + b.processed, 0) +
+                        blockProgress.complete.reduce((sum, b) => sum + b.processed, 0);
+  const progress = totalUploaded > 0 ? Math.round((totalProcessed / totalUploaded) * 100) : 0;
+
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       {/* Header */}
@@ -152,12 +211,12 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
         style={styles.header}
       >
         <Text style={styles.headerTitle}>Monitoring</Text>
-        <Text style={styles.headerSubtitle}>Azure Blob Storage File Monitoring</Text>
+        <Text style={styles.headerSubtitle}>Real-time Upload Progress Tracking</Text>
       </LinearGradient>
 
-      {/* Top Bar: Menu Navigation + DateTime */}
+      {/* Top Bar: Menu Navigation + DateTime + Area Code */}
       <View style={styles.topBarContainer}>
-        {/* Left: Menu Navigation Bar - 75% Width */}
+        {/* Left: Menu Navigation Bar - 50% Width */}
         <View style={styles.topBarLeft}>
           <BlurView intensity={100} tint={isDarkMode ? 'dark' : 'light'} style={styles.menuNavBlur}>
             <ScrollView
@@ -264,22 +323,34 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
           </BlurView>
         </View>
 
-        {/* Right: DateTime Card - 25% Width */}
+        {/* Right: DateTime + Area Code Card - 50% Width */}
         <View style={styles.topBarRight}>
-          <BlurView intensity={80} tint="light" style={styles.dateTimeBlurCard}>
+          <BlurView intensity={80} tint="light" style={styles.infoBlurCard}>
             <LinearGradient
               colors={['rgba(255,255,255,0.9)', 'rgba(240,248,255,0.95)']}
-              style={styles.dateTimeGradientCard}
+              style={styles.infoGradientCard}
             >
-              <View style={styles.dateTimeColumn}>
-                <Text style={styles.dateTimeIcon}>🚁</Text>
-                <Text style={styles.dateTimeText}>
-                  {session?.drone?.drone_code || 'N/A'}
+              {/* Drone Code */}
+              <View style={styles.infoRow}>
+                <Text style={styles.infoIcon}>🚁</Text>
+                <Text style={styles.infoText}>{droneCode}</Text>
+              </View>
+
+              <View style={styles.infoDivider} />
+
+              {/* Area Codes */}
+              <View style={styles.infoRow}>
+                <Text style={styles.infoIcon}>📍</Text>
+                <Text style={styles.infoText}>
+                  {userAreaCodes.length > 0 ? userAreaCodes.join(', ') : 'N/A'}
                 </Text>
               </View>
-              <View style={styles.dateTimeDivider} />
-              <View style={styles.dateTimeColumn}>
-                <Text style={styles.dateTimeIcon}>🕒</Text>
+
+              <View style={styles.infoDivider} />
+
+              {/* Time */}
+              <View style={styles.infoRow}>
+                <Text style={styles.infoIcon}>🕒</Text>
                 <Text style={styles.timeText}>
                   {currentTime.toLocaleTimeString('id-ID', {
                     timeZone: 'Asia/Jakarta',
@@ -312,15 +383,9 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
                 <Text style={styles.radarIcon}>📡</Text>
               </View>
               <View style={styles.headerTextContainer}>
-                <Text style={styles.mainHeaderTitle}>AZURE BLOB MONITOR</Text>
-                <Text style={styles.mainHeaderSubtitle}>Real-time Storage Analytics</Text>
+                <Text style={styles.mainHeaderTitle}>UPLOAD PROGRESS MONITOR</Text>
+                <Text style={styles.mainHeaderSubtitle}>Track your daily uploads</Text>
               </View>
-              <TouchableOpacity
-                onPress={toggleAutoRefresh}
-                style={[styles.autoRefreshButton, autoRefresh && styles.autoRefreshActive]}
-              >
-                <Text style={styles.autoRefreshIcon}>{autoRefresh ? '🔄' : '⏸️'}</Text>
-              </TouchableOpacity>
             </View>
 
             {/* Last Update Time */}
@@ -333,215 +398,181 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
           </LinearGradient>
         </BlurView>
 
-        {/* Processing Status Banner */}
-        {isProcessingComplete ? (
-          <BlurView intensity={90} tint="light" style={styles.statusBannerBlur}>
+        {/* Upload Summary Cards */}
+        <View style={styles.summaryCardsContainer}>
+          {/* Total Uploaded */}
+          <BlurView intensity={90} tint="light" style={styles.summaryCardBlur}>
             <LinearGradient
-              colors={['rgba(76,175,80,0.15)', 'rgba(102,187,106,0.1)']}
-              style={styles.statusBannerGradient}
+              colors={['rgba(0,191,255,0.08)', 'rgba(30,144,255,0.05)']}
+              style={styles.summaryCard}
             >
-              <Text style={styles.statusBannerIcon}>✅</Text>
-              <View style={styles.statusBannerTextContainer}>
-                <Text style={styles.statusBannerTitle}>ALL PROCESSING COMPLETE</Text>
-                <Text style={styles.statusBannerSubtitle}>Queue is empty - System ready</Text>
-              </View>
+              <Text style={styles.summaryCardIcon}>📤</Text>
+              <Text style={styles.summaryCardLabel}>UPLOADED</Text>
+              <Text style={[styles.summaryCardValue, { color: '#00BFFF' }]}>{totalUploaded}</Text>
+              <Text style={styles.summaryCardUnit}>files</Text>
             </LinearGradient>
           </BlurView>
-        ) : (
-          <BlurView intensity={90} tint="light" style={styles.statusBannerBlur}>
+
+          {/* Total Processed */}
+          <BlurView intensity={90} tint="light" style={styles.summaryCardBlur}>
             <LinearGradient
-              colors={['rgba(255,193,7,0.15)', 'rgba(255,152,0,0.1)']}
-              style={styles.statusBannerGradient}
+              colors={['rgba(76,175,80,0.08)', 'rgba(102,187,106,0.05)']}
+              style={styles.summaryCard}
             >
-              <Animated.Text style={[styles.statusBannerIcon, { transform: [{ scale: pulseAnim }] }]}>
-                ⚙️
-              </Animated.Text>
-              <View style={styles.statusBannerTextContainer}>
-                <Text style={styles.statusBannerTitle}>PROCESSING IN PROGRESS</Text>
-                <Text style={styles.statusBannerSubtitle}>{stats.queued} files in queue</Text>
-              </View>
+              <Text style={styles.summaryCardIcon}>✅</Text>
+              <Text style={styles.summaryCardLabel}>PROCESSED</Text>
+              <Text style={[styles.summaryCardValue, { color: '#4CAF50' }]}>{totalProcessed}</Text>
+              <Text style={styles.summaryCardUnit}>files</Text>
+            </LinearGradient>
+          </BlurView>
+
+          {/* Progress Percentage */}
+          <BlurView intensity={90} tint="light" style={styles.summaryCardBlur}>
+            <LinearGradient
+              colors={['rgba(255,193,7,0.08)', 'rgba(255,152,0,0.05)']}
+              style={styles.summaryCard}
+            >
+              <Text style={styles.summaryCardIcon}>📊</Text>
+              <Text style={styles.summaryCardLabel}>PROGRESS</Text>
+              <Text style={[styles.summaryCardValue, { color: '#FFC107' }]}>{progress}%</Text>
+              <Text style={styles.summaryCardUnit}>complete</Text>
+            </LinearGradient>
+          </BlurView>
+        </View>
+
+        {/* Overall Progress Bar */}
+        <BlurView intensity={90} tint="light" style={styles.progressBlur}>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.95)', 'rgba(240,248,255,0.98)']}
+            style={styles.progressGradient}
+          >
+            <View style={styles.progressHeader}>
+              <Text style={styles.progressTitle}>OVERALL PROGRESS</Text>
+              <Text style={styles.progressPercentage}>{progress}%</Text>
+            </View>
+            <View style={styles.progressBarTrack}>
+              <LinearGradient
+                colors={['#4CAF50', '#66BB6A']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={[styles.progressBarFill, { width: `${progress}%` }]}
+              />
+            </View>
+            <Text style={styles.progressSubtext}>
+              {totalProcessed} / {totalUploaded} files completed
+            </Text>
+          </LinearGradient>
+        </BlurView>
+
+        {/* 2-Panel Block Progress Display */}
+        {totalUploaded > 0 ? (
+          <View style={styles.blockProgressContainer}>
+            {/* Left Panel: In Progress (Yellow) */}
+            <View style={styles.blockPanel}>
+              <BlurView intensity={90} tint="light" style={styles.blockPanelBlur}>
+                <LinearGradient
+                  colors={['rgba(255,193,7,0.08)', 'rgba(255,152,0,0.05)']}
+                  style={styles.blockPanelGradient}
+                >
+                  <View style={styles.blockPanelHeader}>
+                    <Text style={styles.blockPanelIcon}>⏳</Text>
+                    <Text style={[styles.blockPanelTitle, { color: '#FFC107' }]}>IN PROGRESS</Text>
+                  </View>
+
+                  <ScrollView style={styles.blockList} showsVerticalScrollIndicator={false}>
+                    {blockProgress.inProgress.length === 0 ? (
+                      <View style={styles.emptyBlockState}>
+                        <Text style={styles.emptyBlockIcon}>✨</Text>
+                        <Text style={styles.emptyBlockText}>All blocks complete!</Text>
+                      </View>
+                    ) : (
+                      blockProgress.inProgress.map((block) => (
+                        <View key={block.area} style={[styles.blockItem, { borderColor: '#FFC107' }]}>
+                          <View style={styles.blockItemHeader}>
+                            <Text style={[styles.blockAreaLabel, { color: '#FFC107' }]}>Block {block.area}</Text>
+                            <Text style={[styles.blockProgressText, { color: '#FFC107' }]}>
+                              {block.processed}/{block.total}
+                            </Text>
+                          </View>
+                          <View style={styles.blockProgressBar}>
+                            <LinearGradient
+                              colors={['#FFC107', '#FF9800']}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 0 }}
+                              style={[styles.blockProgressFill, {
+                                width: `${block.total > 0 ? (block.processed / block.total) * 100 : 0}%`
+                              }]}
+                            />
+                          </View>
+                        </View>
+                      ))
+                    )}
+                  </ScrollView>
+                </LinearGradient>
+              </BlurView>
+            </View>
+
+            {/* Right Panel: Complete (Green) */}
+            <View style={styles.blockPanel}>
+              <BlurView intensity={90} tint="light" style={styles.blockPanelBlur}>
+                <LinearGradient
+                  colors={['rgba(76,175,80,0.08)', 'rgba(102,187,106,0.05)']}
+                  style={styles.blockPanelGradient}
+                >
+                  <View style={styles.blockPanelHeader}>
+                    <Text style={styles.blockPanelIcon}>✅</Text>
+                    <Text style={[styles.blockPanelTitle, { color: '#4CAF50' }]}>COMPLETE</Text>
+                  </View>
+
+                  <ScrollView style={styles.blockList} showsVerticalScrollIndicator={false}>
+                    {blockProgress.complete.length === 0 ? (
+                      <View style={styles.emptyBlockState}>
+                        <Text style={styles.emptyBlockIcon}>⏳</Text>
+                        <Text style={styles.emptyBlockText}>No completed blocks yet</Text>
+                      </View>
+                    ) : (
+                      blockProgress.complete.map((block) => (
+                        <View key={block.area} style={[styles.blockItem, { borderColor: '#4CAF50' }]}>
+                          <View style={styles.blockItemHeader}>
+                            <Text style={[styles.blockAreaLabel, { color: '#4CAF50' }]}>Block {block.area}</Text>
+                            <Text style={[styles.blockProgressText, { color: '#4CAF50' }]}>
+                              {block.processed}/{block.total}
+                            </Text>
+                          </View>
+                          <View style={styles.blockProgressBar}>
+                            <LinearGradient
+                              colors={['#4CAF50', '#66BB6A']}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 0 }}
+                              style={[styles.blockProgressFill, { width: '100%' }]}
+                            />
+                          </View>
+                        </View>
+                      ))
+                    )}
+                  </ScrollView>
+                </LinearGradient>
+              </BlurView>
+            </View>
+          </View>
+        ) : (
+          /* Empty State */
+          <BlurView intensity={90} tint="light" style={styles.emptyStateBlur}>
+            <LinearGradient
+              colors={['rgba(158,158,158,0.08)', 'rgba(117,117,117,0.05)']}
+              style={styles.emptyStateGradient}
+            >
+              <Text style={styles.emptyStateIcon}>📭</Text>
+              <Text style={styles.emptyStateTitle}>No Uploads Today</Text>
+              <Text style={styles.emptyStateSubtitle}>
+                Upload files in the Upload tab to start tracking progress
+              </Text>
+              <Text style={styles.apiWaitingText}>
+                ⏳ Waiting for API endpoints to be configured...
+              </Text>
             </LinearGradient>
           </BlurView>
         )}
-
-        {/* Pipeline Flow Visualization */}
-        <BlurView intensity={90} tint="light" style={styles.pipelineBlur}>
-          <LinearGradient
-            colors={['rgba(255,255,255,0.95)', 'rgba(240,248,255,0.98)']}
-            style={styles.pipelineGradient}
-          >
-            <Text style={styles.pipelineTitle}>PROCESSING PIPELINE</Text>
-
-            {/* Stage 1: Upload → Input */}
-            <View style={styles.stageContainer}>
-              <View style={styles.stageHeader}>
-                <View style={styles.stageNumberBadge}>
-                  <LinearGradient colors={['#FF6B35', '#F7931E']} style={styles.stageNumberGradient}>
-                    <Text style={styles.stageNumber}>1</Text>
-                  </LinearGradient>
-                </View>
-                <Text style={styles.stageTitle}>Upload</Text>
-              </View>
-              <BlurView intensity={80} tint="light" style={styles.stageCardBlur}>
-                <LinearGradient
-                  colors={['rgba(255,107,53,0.08)', 'rgba(247,147,30,0.05)']}
-                  style={styles.stageCard}
-                >
-                  <Text style={styles.stageLabel}>INPUT FOLDER</Text>
-                  <View style={styles.stageValueContainer}>
-                    <Text style={[styles.stageValue, { color: '#FF6B35' }]}>{stats.input}</Text>
-                    <Text style={styles.stageUnit}>files</Text>
-                  </View>
-                  <View style={styles.stageProgressBar}>
-                    <View style={[styles.stageProgressFill, { width: '100%', backgroundColor: '#FF6B35' }]} />
-                  </View>
-                </LinearGradient>
-              </BlurView>
-              <View style={styles.stageArrow}>
-                <Text style={styles.arrowIcon}>⬇️</Text>
-              </View>
-            </View>
-
-            {/* Stage 2: Queued */}
-            <View style={styles.stageContainer}>
-              <View style={styles.stageHeader}>
-                <View style={styles.stageNumberBadge}>
-                  <LinearGradient colors={['#FFC107', '#FF9800']} style={styles.stageNumberGradient}>
-                    <Text style={styles.stageNumber}>2</Text>
-                  </LinearGradient>
-                </View>
-                <Text style={styles.stageTitle}>Queue</Text>
-              </View>
-              <BlurView intensity={80} tint="light" style={styles.stageCardBlur}>
-                <LinearGradient
-                  colors={['rgba(255,193,7,0.08)', 'rgba(255,152,0,0.05)']}
-                  style={styles.stageCard}
-                >
-                  <Text style={styles.stageLabel}>QUEUED FOLDER</Text>
-                  <View style={styles.stageValueContainer}>
-                    <Text style={[styles.stageValue, { color: '#FFC107' }]}>{stats.queued}</Text>
-                    <Text style={styles.stageUnit}>waiting</Text>
-                  </View>
-                  <View style={styles.stageProgressBar}>
-                    <View style={[styles.stageProgressFill, {
-                      width: stats.total > 0 ? `${(stats.queued / stats.total) * 100}%` : '0%',
-                      backgroundColor: '#FFC107'
-                    }]} />
-                  </View>
-                  {stats.queued > 0 && (
-                    <Animated.View style={[styles.processingIndicator, { transform: [{ scale: pulseAnim }] }]}>
-                      <Text style={styles.processingText}>● Processing...</Text>
-                    </Animated.View>
-                  )}
-                </LinearGradient>
-              </BlurView>
-              <View style={styles.stageArrow}>
-                <Text style={styles.arrowIcon}>⬇️</Text>
-              </View>
-            </View>
-
-            {/* Stage 3: Processed */}
-            <View style={styles.stageContainer}>
-              <View style={styles.stageHeader}>
-                <View style={styles.stageNumberBadge}>
-                  <LinearGradient colors={['#2196F3', '#1976D2']} style={styles.stageNumberGradient}>
-                    <Text style={styles.stageNumber}>3</Text>
-                  </LinearGradient>
-                </View>
-                <Text style={styles.stageTitle}>Processed</Text>
-              </View>
-              <BlurView intensity={80} tint="light" style={styles.stageCardBlur}>
-                <LinearGradient
-                  colors={['rgba(33,150,243,0.08)', 'rgba(25,118,210,0.05)']}
-                  style={styles.stageCard}
-                >
-                  <Text style={styles.stageLabel}>PROCESSED TODAY</Text>
-                  <View style={styles.stageValueContainer}>
-                    <Text style={[styles.stageValue, { color: '#2196F3' }]}>{stats.processed}</Text>
-                    <Text style={styles.stageUnit}>completed</Text>
-                  </View>
-                  <View style={styles.stageProgressBar}>
-                    <View style={[styles.stageProgressFill, {
-                      width: `${processingPercentage}%`,
-                      backgroundColor: '#2196F3'
-                    }]} />
-                  </View>
-                  <Text style={styles.percentageText}>{processingPercentage}% Complete</Text>
-                </LinearGradient>
-              </BlurView>
-              <View style={styles.stageArrow}>
-                <Text style={styles.arrowIcon}>⬇️</Text>
-              </View>
-            </View>
-
-            {/* Stage 4: Output Results */}
-            <View style={styles.stageContainer}>
-              <View style={styles.stageHeader}>
-                <View style={styles.stageNumberBadge}>
-                  <LinearGradient colors={['#4CAF50', '#66BB6A']} style={styles.stageNumberGradient}>
-                    <Text style={styles.stageNumber}>4</Text>
-                  </LinearGradient>
-                </View>
-                <Text style={styles.stageTitle}>Results</Text>
-              </View>
-              <View style={styles.outputResultsContainer}>
-                {/* Detected */}
-                <BlurView intensity={80} tint="light" style={styles.outputCardBlur}>
-                  <LinearGradient
-                    colors={['rgba(76,175,80,0.08)', 'rgba(102,187,106,0.05)']}
-                    style={styles.outputCard}
-                  >
-                    <Text style={styles.outputCardIcon}>✅</Text>
-                    <Text style={styles.outputCardLabel}>DETECTED</Text>
-                    <Text style={[styles.outputCardValue, { color: '#4CAF50' }]}>{stats.detected}</Text>
-                  </LinearGradient>
-                </BlurView>
-
-                {/* Undetected */}
-                <BlurView intensity={80} tint="light" style={styles.outputCardBlur}>
-                  <LinearGradient
-                    colors={['rgba(158,158,158,0.08)', 'rgba(117,117,117,0.05)']}
-                    style={styles.outputCard}
-                  >
-                    <Text style={styles.outputCardIcon}>⬜</Text>
-                    <Text style={styles.outputCardLabel}>UNDETECTED</Text>
-                    <Text style={[styles.outputCardValue, { color: '#9E9E9E' }]}>{stats.undetected}</Text>
-                  </LinearGradient>
-                </BlurView>
-              </View>
-            </View>
-          </LinearGradient>
-        </BlurView>
-
-        {/* System Info */}
-        <BlurView intensity={80} tint="light" style={styles.systemInfoBlur}>
-          <LinearGradient
-            colors={['rgba(0,191,255,0.05)', 'rgba(30,144,255,0.08)']}
-            style={styles.systemInfoGradient}
-          >
-            <Text style={styles.systemInfoTitle}>SYSTEM INFORMATION</Text>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemInfoLabel}>Storage Account:</Text>
-              <Text style={styles.systemInfoValue}>azmaisap100</Text>
-            </View>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemInfoLabel}>Container:</Text>
-              <Text style={styles.systemInfoValue}>imagedetection</Text>
-            </View>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemInfoLabel}>Auto-Refresh:</Text>
-              <Text style={[styles.systemInfoValue, { color: autoRefresh ? '#4CAF50' : '#F44336' }]}>
-                {autoRefresh ? 'ENABLED (30s)' : 'DISABLED'}
-              </Text>
-            </View>
-            <View style={styles.systemInfoRow}>
-              <Text style={styles.systemInfoLabel}>Status:</Text>
-              <Text style={[styles.systemInfoValue, { color: isProcessingComplete ? '#4CAF50' : '#FFC107' }]}>
-                {isProcessingComplete ? 'IDLE' : 'PROCESSING'}
-              </Text>
-            </View>
-          </LinearGradient>
-        </BlurView>
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -583,7 +614,7 @@ const styles = StyleSheet.create({
     zIndex: 99,
   },
   topBarLeft: {
-    flex: 3,
+    flex: 1,
   },
   topBarRight: {
     flex: 1,
@@ -643,13 +674,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     opacity: 0.6,
   },
-  dateTimeBlurCard: {
+  infoBlurCard: {
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(30, 144, 255, 0.2)',
   },
-  dateTimeGradientCard: {
+  infoGradientCard: {
     borderRadius: 16,
     paddingVertical: 8,
     paddingHorizontal: 8,
@@ -662,30 +693,28 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 4,
   },
-  dateTimeColumn: {
-    flexDirection: 'column',
+  infoRow: {
+    flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
   },
-  dateTimeIcon: {
-    fontSize: 12,
+  infoIcon: {
+    fontSize: 10,
   },
-  dateTimeDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: 'rgba(30, 144, 255, 0.3)',
-  },
-  dateTimeText: {
-    fontSize: 9,
+  infoText: {
+    fontSize: 8,
     fontWeight: '600',
     color: '#0047AB',
-    textAlign: 'center',
   },
   timeText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
     color: '#1E90FF',
-    textAlign: 'center',
+  },
+  infoDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: 'rgba(30, 144, 255, 0.3)',
   },
   content: {
     flex: 1,
@@ -735,23 +764,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     fontWeight: '600',
   },
-  autoRefreshButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(158,158,158,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#9E9E9E',
-  },
-  autoRefreshActive: {
-    backgroundColor: 'rgba(76,175,80,0.2)',
-    borderColor: '#4CAF50',
-  },
-  autoRefreshIcon: {
-    fontSize: 20,
-  },
   lastUpdateContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -778,201 +790,198 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0047AB',
   },
-  statusBannerBlur: {
+  summaryCardsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  summaryCardBlur: {
+    flex: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  summaryCard: {
+    padding: 16,
+    alignItems: 'center',
+  },
+  summaryCardIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  summaryCardLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#0047AB',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  summaryCardValue: {
+    fontSize: 28,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  summaryCardUnit: {
+    fontSize: 10,
+    color: '#00BFFF',
+    fontWeight: '600',
+  },
+  progressBlur: {
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 16,
   },
-  statusBannerGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  progressGradient: {
     padding: 16,
   },
-  statusBannerIcon: {
-    fontSize: 32,
-    marginRight: 12,
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  statusBannerTextContainer: {
-    flex: 1,
-  },
-  statusBannerTitle: {
-    fontSize: 14,
+  progressTitle: {
+    fontSize: 12,
     fontWeight: '900',
     color: '#0047AB',
     letterSpacing: 1,
-    marginBottom: 4,
   },
-  statusBannerSubtitle: {
-    fontSize: 11,
+  progressPercentage: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#4CAF50',
+  },
+  progressBarTrack: {
+    height: 12,
+    backgroundColor: 'rgba(0,191,255,0.15)',
+    borderRadius: 6,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 6,
+  },
+  progressSubtext: {
+    fontSize: 10,
+    color: '#00BFFF',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  blockProgressContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  blockPanel: {
+    flex: 1,
+  },
+  blockPanelBlur: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    height: 300,
+  },
+  blockPanelGradient: {
+    flex: 1,
+    padding: 16,
+  },
+  blockPanelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: 'rgba(0,191,255,0.2)',
+  },
+  blockPanelIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  blockPanelTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  blockList: {
+    flex: 1,
+  },
+  blockItem: {
+    backgroundColor: 'rgba(255,255,255,0.5)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 2,
+  },
+  blockItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  blockAreaLabel: {
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  blockProgressText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  blockProgressBar: {
+    height: 6,
+    backgroundColor: 'rgba(0,191,255,0.15)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  blockProgressFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  emptyBlockState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  emptyBlockIcon: {
+    fontSize: 40,
+    marginBottom: 12,
+  },
+  emptyBlockText: {
+    fontSize: 12,
     color: '#00BFFF',
     fontWeight: '600',
   },
-  pipelineBlur: {
+  emptyStateBlur: {
     borderRadius: 20,
     overflow: 'hidden',
     marginBottom: 16,
   },
-  pipelineGradient: {
-    padding: 16,
-  },
-  pipelineTitle: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#0047AB',
-    letterSpacing: 1,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  stageContainer: {
-    marginBottom: 12,
-  },
-  stageHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  stageNumberBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginRight: 8,
-  },
-  stageNumberGradient: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
+  emptyStateGradient: {
+    padding: 40,
     alignItems: 'center',
   },
-  stageNumber: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#fff',
-  },
-  stageTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0047AB',
-    letterSpacing: 0.5,
-  },
-  stageCardBlur: {
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  stageCard: {
-    padding: 16,
-  },
-  stageLabel: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#0047AB',
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  stageValueContainer: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 12,
-  },
-  stageValue: {
-    fontSize: 32,
-    fontWeight: '900',
-    marginRight: 8,
-  },
-  stageUnit: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#00BFFF',
-  },
-  stageProgressBar: {
-    height: 8,
-    backgroundColor: 'rgba(0,191,255,0.1)',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  stageProgressFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  processingIndicator: {
-    marginTop: 8,
-  },
-  processingText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#FFC107',
-  },
-  percentageText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#00BFFF',
-    marginTop: 6,
-  },
-  stageArrow: {
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  arrowIcon: {
-    fontSize: 24,
-  },
-  outputResultsContainer: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  outputCardBlur: {
-    flex: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  outputCard: {
-    padding: 16,
-    alignItems: 'center',
-  },
-  outputCardIcon: {
-    fontSize: 28,
-    marginBottom: 8,
-  },
-  outputCardLabel: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#0047AB',
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
-  outputCardValue: {
-    fontSize: 28,
-    fontWeight: '900',
-  },
-  systemInfoBlur: {
-    borderRadius: 16,
-    overflow: 'hidden',
+  emptyStateIcon: {
+    fontSize: 64,
     marginBottom: 16,
   },
-  systemInfoGradient: {
-    padding: 16,
-  },
-  systemInfoTitle: {
-    fontSize: 12,
+  emptyStateTitle: {
+    fontSize: 18,
     fontWeight: '900',
     color: '#0047AB',
-    letterSpacing: 1,
+    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
+  emptyStateSubtitle: {
+    fontSize: 12,
+    color: '#00BFFF',
+    textAlign: 'center',
+    fontWeight: '600',
     marginBottom: 12,
   },
-  systemInfoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,191,255,0.1)',
-  },
-  systemInfoLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#00BFFF',
-  },
-  systemInfoValue: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#0047AB',
+  apiWaitingText: {
+    fontSize: 10,
+    color: '#FFC107',
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
 });

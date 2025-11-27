@@ -7,13 +7,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  * NO ENVIRONMENT VARIABLES - all endpoints hardcoded for APK build
  */
 
-const DEV_BASE_URL = 'rnd-dev.bsi.co.id';
 const PROD_BASE_URL = 'droneark.bsi.co.id';
 
 export class ApiService {
   constructor(useProd = true) {
-    this.baseUrl = useProd ? PROD_BASE_URL : DEV_BASE_URL;
-    this.basePath = useProd ? '/api' : '/drone';
+    this.baseUrl = PROD_BASE_URL;
+    this.basePath = '/api';
     this.accessToken = null;
     this.refreshToken = null;
 
@@ -617,10 +616,16 @@ export class ApiService {
   } = {}) {
     await this.init(); // Ensure tokens are loaded
 
+    // Get today's date in YYYY-MM-DD format for filtering
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0]; // Format: 2025-11-21
+
     const query = {
       'paging[limit]': pageSize.toString(),
       'paging[page]': page.toString(),
-      'orders[area]': 'desc', // Always order by area descending
+      'orders[area]': 'desc', // Order by area descending
+      'orders[date]': 'desc', // Order by date descending (newest first)
+      'filters[date]': todayStr, // Filter only today's cases
     };
 
     // CRITICAL: filters[areaId] MUST ALWAYS be present (from user_id at login)
@@ -660,10 +665,12 @@ export class ApiService {
     const url = this.buildUrl(this.endpoints.caseList, query);
     console.log('[API] getCaseList - Full URL:', url);
     console.log('[API] getCaseList - All Filters:', {
+      date: todayStr, // Today's date filter
       areaId: query['filters[areaId]'] || 'MISSING!',
       areaCode: filterAreaCode || 'all areas',
       isConfirmed: filterIsConfirmed !== null ? filterIsConfirmed : 'none',
       statusIds: filterStatusIds || 'none',
+      orders: 'area=desc, date=desc',
     });
 
     const response = await this.fetchData({ method: 'GET', url });

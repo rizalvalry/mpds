@@ -19,9 +19,10 @@ import apiService from '../services/ApiService';
 const { width, height } = Dimensions.get('window');
 
 export default function LoginScreen({ setSession }) {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(50));
   const [pulseAnim] = useState(new Animated.Value(1));
@@ -60,15 +61,15 @@ export default function LoginScreen({ setSession }) {
   }, []);
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please enter email and password');
+    if (!username || !password) {
+      Alert.alert('Error', 'Please enter username and password');
       return;
     }
 
     setLoading(true);
     try {
-      console.log('[Login] Attempting login with email:', email);
-      const response = await apiService.login(email, password);
+      console.log('[Login] Attempting login with username:', username);
+      const response = await apiService.login(username, password);
 
       console.log('[Login] Response:', response);
 
@@ -80,14 +81,69 @@ export default function LoginScreen({ setSession }) {
         setSession(response);
       } else {
         console.log('[Login] Failed - no session token');
-        Alert.alert('Login Failed', response.message || 'Invalid credentials');
+
+        // Determine error message based on status code
+        let errorTitle = 'Login Failed';
+        let errorMessage = response.message || 'Invalid credentials';
+
+        if (response.status_code) {
+          switch (response.status_code) {
+            case 502:
+            case 503:
+            case 504:
+              errorTitle = 'Server Error';
+              errorMessage = 'Server is temporarily unavailable. Please try again in a few moments.\n\nError Code: ' + response.status_code;
+              break;
+            case 500:
+              errorTitle = 'Server Error';
+              errorMessage = 'Internal server error occurred. Please contact support if this persists.\n\nError Code: 500';
+              break;
+            case 401:
+              errorTitle = 'Authentication Failed';
+              errorMessage = 'Invalid username or password. Please check your credentials and try again.';
+              break;
+            case 403:
+              errorTitle = 'Access Denied';
+              errorMessage = 'You do not have permission to access this system.';
+              break;
+            case 404:
+              errorTitle = 'Connection Error';
+              errorMessage = 'Login endpoint not found. Please check your configuration.';
+              break;
+            case 408:
+            case 0:
+              errorTitle = 'Connection Timeout';
+              errorMessage = 'Request timed out. Please check your internet connection and try again.';
+              break;
+            default:
+              if (response.status_code >= 500) {
+                errorTitle = 'Server Error';
+                errorMessage = `Server error occurred (${response.status_code}). Please try again later.`;
+              }
+          }
+        }
+
+        Alert.alert(errorTitle, errorMessage);
       }
     } catch (error) {
       console.error('[Login] Error:', error);
-      Alert.alert(
-        'Login Error',
-        error.message || 'Unable to connect to server. Please try again.'
-      );
+
+      // Handle network errors
+      let errorTitle = 'Connection Error';
+      let errorMessage = 'Unable to connect to server. Please check your internet connection and try again.';
+
+      if (error.message) {
+        if (error.message.includes('Network request failed')) {
+          errorMessage = 'Network connection failed. Please check:\n\n• Your internet connection\n• Server availability\n• Firewall settings';
+        } else if (error.message.includes('timeout')) {
+          errorTitle = 'Connection Timeout';
+          errorMessage = 'Connection timed out. The server is taking too long to respond. Please try again.';
+        } else {
+          errorMessage = error.message;
+        }
+      }
+
+      Alert.alert(errorTitle, errorMessage);
     } finally {
       setLoading(false);
     }
@@ -95,18 +151,13 @@ export default function LoginScreen({ setSession }) {
 
   return (
     <View style={styles.container}>
-      {/* Animated Background Gradient */}
+      {/* Clean Gradient Background - matching main app */}
       <LinearGradient
-        colors={['#0A0E27', '#1a1f3a', '#0047AB', '#1E90FF']}
+        colors={['#e6f2ff', '#f0f8ff', '#ffffff']}
         start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+        end={{ x: 0, y: 1 }}
         style={styles.backgroundGradient}
       >
-        {/* Decorative Circles - Premium Background Effect */}
-        <View style={[styles.circle, styles.circle1]} />
-        <View style={[styles.circle, styles.circle2]} />
-        <View style={[styles.circle, styles.circle3]} />
-
         <KeyboardAvoidingView
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -120,94 +171,84 @@ export default function LoginScreen({ setSession }) {
               },
             ]}
           >
-            {/* Premium Header Section */}
-            <Animated.View
-              style={[
-                styles.headerSection,
-                { transform: [{ scale: pulseAnim }] },
-              ]}
-            >
-              <View style={styles.brandContainer}>
-                <Text style={styles.mainTitle}>Motor Pool Drone Systems</Text>
-                <View style={styles.dividerLine} />
-                <Text style={styles.tagline}>Artificial Intelligence Powered</Text>
+            {/* Elegant Header */}
+            <View style={styles.headerSection}>
+              <Text style={styles.mainTitle}>Motor Pool Drone Systems</Text>
+              <View style={styles.dividerLine} />
+              <Text style={styles.subtitle}>Sign in to continue</Text>
+            </View>
+
+            {/* Clean Login Card */}
+            <View style={styles.loginCard}>
+              <Text style={styles.formTitle}>Login</Text>
+
+              {/* Username Input */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Username</Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your username"
+                    placeholderTextColor="#999"
+                    value={username}
+                    onChangeText={setUsername}
+                    autoCapitalize="none"
+                    editable={!loading}
+                  />
+                </View>
               </View>
-            </Animated.View>
 
-            {/* Glass Morphism Login Card */}
-            <BlurView intensity={20} tint="dark" style={styles.loginCard}>
-              <LinearGradient
-                colors={['rgba(255,255,255,0.15)', 'rgba(255,255,255,0.05)']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.glassGradient}
-              >
-                <Text style={styles.formTitle}>SECURE ACCESS</Text>
-
-                {/* Email Input */}
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>EMAIL ADDRESS</Text>
-                  <BlurView intensity={30} tint="dark" style={styles.inputBlur}>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="your.email@domain.com"
-                      placeholderTextColor="rgba(255,255,255,0.4)"
-                      value={email}
-                      onChangeText={setEmail}
-                      autoCapitalize="none"
-                      keyboardType="email-address"
-                      editable={!loading}
-                    />
-                  </BlurView>
-                </View>
-
-                {/* Password Input */}
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>PASSWORD</Text>
-                  <BlurView intensity={30} tint="dark" style={styles.inputBlur}>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter your password"
-                      placeholderTextColor="rgba(255,255,255,0.4)"
-                      value={password}
-                      onChangeText={setPassword}
-                      secureTextEntry
-                      editable={!loading}
-                    />
-                  </BlurView>
-                </View>
-
-                {/* Premium Login Button */}
-                <TouchableOpacity
-                  onPress={handleLogin}
-                  disabled={loading}
-                  style={styles.loginButtonContainer}
-                  activeOpacity={0.8}
-                >
-                  <LinearGradient
-                    colors={loading ? ['#555', '#333'] : ['#00BFFF', '#1E90FF', '#0047AB']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.loginButton}
+              {/* Password Input */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Password</Text>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={[styles.input, styles.passwordInput]}
+                    placeholder="Enter your password"
+                    placeholderTextColor="#999"
+                    value={password}
+                    onChangeText={setPassword}
+                    secureTextEntry={!showPassword}
+                    editable={!loading}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowPassword((prev) => !prev)}
+                    disabled={loading}
+                    style={styles.toggleButton}
+                    activeOpacity={0.7}
                   >
-                    {loading ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <>
-                        <Text style={styles.loginButtonText}>ACCESS SYSTEM</Text>
-                        <Text style={styles.loginButtonArrow}>→</Text>
-                      </>
-                    )}
-                  </LinearGradient>
-                </TouchableOpacity>
-              </LinearGradient>
-            </BlurView>
+                    <Text style={styles.toggleButtonText}>
+                      {showPassword ? '👁️' : '👁️‍🗨️'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
 
-            {/* Premium Footer */}
+              {/* Login Button */}
+              <TouchableOpacity
+                onPress={handleLogin}
+                disabled={loading}
+                style={styles.loginButtonContainer}
+                activeOpacity={0.8}
+              >
+                <LinearGradient
+                  colors={loading ? ['#BDBDBD', '#9E9E9E'] : ['#00BFFF', '#1E90FF', '#0047AB']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.loginButton}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.loginButtonText}>Get Started</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+
+            {/* Footer */}
             <View style={styles.footer}>
-              <View style={styles.footerDivider} />
-              <Text style={styles.footerText}>POWERED BY BSI RESEARCH & DEVELOPMENT</Text>
-              <Text style={styles.footerVersion}>Version 1.0.0 • Enterprise Edition</Text>
+              <Text style={styles.footerVersion}>Version 1.0.0</Text>
             </View>
           </Animated.View>
         </KeyboardAvoidingView>
@@ -222,34 +263,6 @@ const styles = StyleSheet.create({
   },
   backgroundGradient: {
     flex: 1,
-    position: 'relative',
-  },
-  // Decorative Background Circles
-  circle: {
-    position: 'absolute',
-    borderRadius: 9999,
-    opacity: 0.1,
-  },
-  circle1: {
-    width: 400,
-    height: 400,
-    backgroundColor: '#00BFFF',
-    top: -100,
-    right: -100,
-  },
-  circle2: {
-    width: 300,
-    height: 300,
-    backgroundColor: '#1E90FF',
-    bottom: -50,
-    left: -50,
-  },
-  circle3: {
-    width: 200,
-    height: 200,
-    backgroundColor: '#0047AB',
-    top: '40%',
-    left: '70%',
   },
   keyboardView: {
     flex: 1,
@@ -257,152 +270,118 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: width > 768 ? width * 0.2 : 24,
-    paddingVertical: 20,
-    paddingBottom: 60,
+    paddingHorizontal: width > 768 ? width * 0.25 : 32,
+    paddingVertical: 40,
   },
-  // Premium Header
+  // Elegant Header
   headerSection: {
     alignItems: 'center',
-    marginBottom: 32,
-  },
-  brandContainer: {
-    alignItems: 'center',
-  },
-  brandLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#00BFFF',
-    letterSpacing: 3,
-    marginBottom: 16,
+    marginBottom: 40,
   },
   mainTitle: {
-    fontSize: width > 768 ? 36 : 28,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: 1,
+    fontSize: width > 768 ? 32 : 26,
+    fontWeight: '700',
+    color: '#0047AB',
     textAlign: 'center',
-    textShadowColor: 'rgba(0, 191, 255, 0.5)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 20,
+    marginBottom: 12,
   },
   dividerLine: {
-    width: 80,
-    height: 2,
+    width: 60,
+    height: 3,
     backgroundColor: '#00BFFF',
-    marginVertical: 12,
     borderRadius: 2,
-  },
-  tagline: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#00BFFF',
-    letterSpacing: 1,
+    marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 1,
+    color: '#666',
+    fontWeight: '500',
   },
-  // Glass Morphism Card
+  // Clean Login Card
   loginCard: {
-    borderRadius: 24,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 32,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.5,
-    shadowRadius: 30,
-    elevation: 20,
-  },
-  glassGradient: {
-    padding: 24,
-    borderRadius: 24,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
   },
   formTitle: {
-    fontSize: 12,
+    fontSize: 24,
     fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 2,
-    marginBottom: 20,
+    color: '#0047AB',
+    marginBottom: 24,
     textAlign: 'center',
   },
   // Input Fields
   inputGroup: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   inputLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.9)',
-    letterSpacing: 1.5,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0047AB',
     marginBottom: 8,
   },
-  inputBlur: {
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F9FF',
     borderRadius: 12,
-    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: '#E0E0E0',
   },
   input: {
+    flex: 1,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 15,
-    color: '#FFFFFF',
+    color: '#333',
     fontWeight: '500',
   },
-  // Premium Button
+  passwordInput: {
+    flex: 1,
+  },
+  toggleButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  toggleButtonText: {
+    fontSize: 20,
+  },
+  // Login Button
   loginButtonContainer: {
-    marginTop: 8,
+    marginTop: 12,
     borderRadius: 12,
     overflow: 'hidden',
-    shadowColor: '#00BFFF',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.6,
-    shadowRadius: 16,
-    elevation: 12,
+    shadowColor: '#1E90FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
   loginButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     paddingVertical: 16,
     paddingHorizontal: 32,
-    gap: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   loginButtonText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 2,
-  },
-  loginButtonArrow: {
-    color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '700',
+    letterSpacing: 0.5,
   },
-  // Premium Footer
+  // Footer
   footer: {
     alignItems: 'center',
-    marginTop: 24,
-  },
-  footerDivider: {
-    width: 60,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    marginBottom: 16,
-  },
-  footerText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 2,
-    marginBottom: 8,
+    marginTop: 32,
   },
   footerVersion: {
-    fontSize: 9,
-    color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 1,
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '500',
   },
 });

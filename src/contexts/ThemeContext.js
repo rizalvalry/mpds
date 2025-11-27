@@ -179,13 +179,13 @@ const darkTheme = {
 };
 
 const ThemeContext = createContext({
-  isDarkMode: false,
-  theme: lightTheme,
+  isDarkMode: true,
+  theme: darkTheme,
   toggleTheme: () => {},
 });
 
 export const ThemeProvider = ({ children }) => {
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(true);
 
   useEffect(() => {
     const loadTheme = async () => {

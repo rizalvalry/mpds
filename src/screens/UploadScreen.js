@@ -1,3 +1,4 @@
+// Updated: 2025-01-13 - UI changes applied
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -305,10 +306,12 @@ export default function UploadScreen({ session, setSession, activeMenu, setActiv
       // Save upload batch to AsyncStorage for Monitoring tab tracking
       try {
         const droneCode = session?.drone?.drone_code || 'N/A';
-        await addUploadBatch(result.summary.success, droneCode);
+        const areaCodes = session?.area_code || [];
+        await addUploadBatch(result.summary.success, droneCode, areaCodes);
         console.log('[UploadScreen] Saved upload batch to AsyncStorage:', {
           totalFiles: result.summary.success,
           droneCode,
+          areaCodes,
         });
       } catch (error) {
         console.error('[UploadScreen] Failed to save upload batch:', error);
@@ -521,10 +524,108 @@ export default function UploadScreen({ session, setSession, activeMenu, setActiv
         </View>
       </View>
 
-      {/* Two Panel Layout: Left (Count Display) + Right (Upload Browse) */}
+      {/* Two Panel Layout: Left (Upload Browse) + Right (Preview) */}
       <View style={styles.twoPanelContainer}>
-        {/* LEFT PANEL - Futuristic Upload Progress Display */}
+        {/* LEFT PANEL - Upload Browse (40%) with Scrolling */}
         <ScrollView style={styles.leftPanel} showsVerticalScrollIndicator={false}>
+          <BlurView intensity={90} tint="light" style={styles.rightPanelBlur}>
+            <LinearGradient
+              colors={['rgba(255,255,255,0.95)', 'rgba(240,248,255,0.98)']}
+              style={styles.rightPanelGradient}
+            >
+              <Text style={styles.panelTitle}>📁 FILE SELECTION</Text>
+
+              {/* Upload Statistics */}
+              {uploading && totalBatches > 0 && (
+                <View style={styles.statsCard}>
+                  <View style={styles.statsRow}>
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>{currentBatch}</Text>
+                      <Text style={styles.statLabel}>Batch</Text>
+                    </View>
+                    <View style={styles.statDivider} />
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>{totalBatches}</Text>
+                      <Text style={styles.statLabel}>Total</Text>
+                    </View>
+                    <View style={styles.statDivider} />
+                    <View style={styles.statItem}>
+                      <Text style={styles.statValue}>{selectedImages.length}</Text>
+                      <Text style={styles.statLabel}>Images</Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Browse Files Button (File Manager) - ONLY OPTION for bulk uploads */}
+              <TouchableOpacity
+                onPress={pickFilesFromManager}
+                disabled={uploading}
+                style={[styles.browseButton, uploading && styles.buttonDisabled]}
+              >
+                <LinearGradient
+                  colors={uploading ? ['#BDBDBD', '#9E9E9E'] : ['#FF6B35', '#F7931E', '#FDB833']}
+                  style={styles.browseButtonGradient}
+                >
+                  <Text style={styles.browseButtonIcon}>📁</Text>
+                  <Text style={styles.browseButtonText}>Browse Files</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Selected Count */}
+              {selectedImages.length > 0 && (
+                <View style={styles.selectedCountCard}>
+                  <Text style={styles.selectedCountText}>
+                    📸 {selectedImages.length} images selected
+                  </Text>
+                  <Text style={styles.selectedBatchText}>
+                    {Math.ceil(selectedImages.length / batchSize)} batches ({batchSize} per batch)
+                  </Text>
+                </View>
+              )}
+
+              {/* Clear All Button */}
+              {selectedImages.length > 0 && !uploading && (
+                <TouchableOpacity onPress={clearAll} style={styles.clearAllButton}>
+                  <Text style={styles.clearAllButtonText}>🗑️ Clear All</Text>
+                </TouchableOpacity>
+              )}
+
+              <View style={{ flex: 1 }} />
+
+              {/* Upload Button */}
+              {selectedImages.length > 0 && (
+                <TouchableOpacity
+                  onPress={uploadImages}
+                  disabled={uploading}
+                  style={[styles.uploadMainButton, uploading && styles.buttonDisabled]}
+                >
+                  <LinearGradient
+                    colors={uploading ? ['#BDBDBD', '#9E9E9E'] : ['#00BFFF', '#1E90FF', '#0047AB']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.uploadMainButtonGradient}
+                  >
+                    {uploading ? (
+                      <>
+                        <Text style={styles.uploadMainButtonIcon}>⏳</Text>
+                        <Text style={styles.uploadMainButtonText}>Uploading...</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.uploadMainButtonIcon}>🚀</Text>
+                        <Text style={styles.uploadMainButtonText}>Upload {selectedImages.length} Images</Text>
+                      </>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
+            </LinearGradient>
+          </BlurView>
+        </ScrollView>
+
+        {/* RIGHT PANEL - Futuristic Upload Progress Display */}
+        <ScrollView style={styles.rightPanel} showsVerticalScrollIndicator={false}>
           <BlurView intensity={90} tint="light" style={styles.leftPanelBlur}>
             <LinearGradient
               colors={['rgba(0,191,255,0.05)', 'rgba(30,144,255,0.08)', 'rgba(0,71,171,0.05)']}
@@ -533,12 +634,10 @@ export default function UploadScreen({ session, setSession, activeMenu, setActiv
               {/* Header */}
               <View style={styles.leftPanelHeader}>
                 <View style={styles.droneIconContainer}>
-                  {/* <Text style={styles.droneIcon}>🚁</Text> */}
                   <View style={styles.droneSignalPulse} />
                 </View>
                 <View style={styles.headerTextContainer}>
-                  <Text style={styles.leftPanelTitle}>DRONE AI Upload</Text>
-                  <Text style={styles.leftPanelSubtitle}>Neural Network Transfer</Text>
+                  <Text style={styles.leftPanelTitle}>Upload Preview</Text>
                 </View>
               </View>
 
@@ -549,11 +648,8 @@ export default function UploadScreen({ session, setSession, activeMenu, setActiv
                       colors={['rgba(0,191,255,0.2)', 'rgba(30,144,255,0.1)']}
                       style={styles.emptyIconGradient}
                     >
-                      {/* <Text style={styles.emptyIcon}>📡</Text> */}
                     </LinearGradient>
                   </View>
-                  <Text style={styles.emptyStateTitle}>Preview Mode</Text>
-                  <Text style={styles.emptyStateSubtitle}>Select images to initialize upload sequence</Text>
                 </View>
               ) : (
                 <View style={styles.uploadContentContainer}>
@@ -698,105 +794,6 @@ export default function UploadScreen({ session, setSession, activeMenu, setActiv
                     </View>
                   )}
                 </View>
-              )}
-            </LinearGradient>
-          </BlurView>
-        </ScrollView>
-
-        {/* RIGHT PANEL - Upload Browse (40%) with Scrolling */}
-        <ScrollView style={styles.rightPanel} showsVerticalScrollIndicator={false}>
-          <BlurView intensity={90} tint="light" style={styles.rightPanelBlur}>
-            <LinearGradient
-              colors={['rgba(255,255,255,0.95)', 'rgba(240,248,255,0.98)']}
-              style={styles.rightPanelGradient}
-            >
-              <Text style={styles.panelTitle}>📁 Upload Browse</Text>
-
-              {/* Upload Statistics */}
-              {uploading && totalBatches > 0 && (
-                <View style={styles.statsCard}>
-                  <View style={styles.statsRow}>
-                    <View style={styles.statItem}>
-                      <Text style={styles.statValue}>{currentBatch}</Text>
-                      <Text style={styles.statLabel}>Batch</Text>
-                    </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statItem}>
-                      <Text style={styles.statValue}>{totalBatches}</Text>
-                      <Text style={styles.statLabel}>Total</Text>
-                    </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statItem}>
-                      <Text style={styles.statValue}>{selectedImages.length}</Text>
-                      <Text style={styles.statLabel}>Images</Text>
-                    </View>
-                  </View>
-                </View>
-              )}
-
-              {/* Browse Files Button (File Manager) - ONLY OPTION for bulk uploads */}
-              <TouchableOpacity
-                onPress={pickFilesFromManager}
-                disabled={uploading}
-                style={[styles.browseButton, uploading && styles.buttonDisabled]}
-              >
-                <LinearGradient
-                  colors={uploading ? ['#BDBDBD', '#9E9E9E'] : ['#FF6B35', '#F7931E', '#FDB833']}
-                  style={styles.browseButtonGradient}
-                >
-                  <Text style={styles.browseButtonIcon}>📁</Text>
-                  <Text style={styles.browseButtonText}>Browse Files</Text>
-                  <Text style={styles.browseButtonSubtext}>Select from file manager (supports bulk)</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-
-              {/* Selected Count */}
-              {selectedImages.length > 0 && (
-                <View style={styles.selectedCountCard}>
-                  <Text style={styles.selectedCountText}>
-                    📸 {selectedImages.length} images selected
-                  </Text>
-                  <Text style={styles.selectedBatchText}>
-                    {Math.ceil(selectedImages.length / batchSize)} batches ({batchSize} per batch)
-                  </Text>
-                </View>
-              )}
-
-              {/* Clear All Button */}
-              {selectedImages.length > 0 && !uploading && (
-                <TouchableOpacity onPress={clearAll} style={styles.clearAllButton}>
-                  <Text style={styles.clearAllButtonText}>🗑️ Clear All</Text>
-                </TouchableOpacity>
-              )}
-
-              <View style={{ flex: 1 }} />
-
-              {/* Upload Button */}
-              {selectedImages.length > 0 && (
-                <TouchableOpacity
-                  onPress={uploadImages}
-                  disabled={uploading}
-                  style={[styles.uploadMainButton, uploading && styles.buttonDisabled]}
-                >
-                  <LinearGradient
-                    colors={uploading ? ['#BDBDBD', '#9E9E9E'] : ['#00BFFF', '#1E90FF', '#0047AB']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.uploadMainButtonGradient}
-                  >
-                    {uploading ? (
-                      <>
-                        <Text style={styles.uploadMainButtonIcon}>⏳</Text>
-                        <Text style={styles.uploadMainButtonText}>Uploading...</Text>
-                      </>
-                    ) : (
-                      <>
-                        <Text style={styles.uploadMainButtonIcon}>🚀</Text>
-                        <Text style={styles.uploadMainButtonText}>Upload {selectedImages.length} Images</Text>
-                      </>
-                    )}
-                  </LinearGradient>
-                </TouchableOpacity>
               )}
             </LinearGradient>
           </BlurView>

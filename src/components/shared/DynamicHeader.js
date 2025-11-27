@@ -7,20 +7,34 @@ import {
   Alert,
   Image,
   Switch,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import apiService from '../../services/ApiService';
+import * as Location from 'expo-location';
+import { useTheme } from '../../contexts/ThemeContext';
 
 export default function DynamicHeader({
   title,
   subtitle,
   session,
   setSession,
-  onThemeToggle,
-  isDarkMode = false,
 }) {
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [weatherInfo, setWeatherInfo] = useState({
+    location: 'Memuat lokasi...',
+    temperature: null,
+    condition: 'Memuat cuaca...',
+  });
+  const [weatherForecast, setWeatherForecast] = useState({
+    morning: null,
+    afternoon: null,
+    evening: null,
+  });
+  const [weatherLoading, setWeatherLoading] = useState(true);
+  const [locationError, setLocationError] = useState(null);
+  const { isDarkMode, toggleTheme } = useTheme();
 
   // Update clock every second
   useEffect(() => {
@@ -28,6 +42,277 @@ export default function DynamicHeader({
       setCurrentTime(new Date());
     }, 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Helper function to extract forecast for specific time period (DEPRECATED - not used anymore)
+  const getForecastForPeriod = (forecastData, period) => {
+    if (!forecastData || !forecastData.data || !Array.isArray(forecastData.data)) {
+      console.log(`[getForecastForPeriod] No forecast data for ${period}`);
+      return null;
+    }
+
+    // BMKG API structure: data is direct array of forecast items
+    const dataArray = forecastData.data;
+    console.log(`[getForecastForPeriod] Processing ${period}, data entries:`, dataArray.length);
+
+    if (dataArray.length === 0) {
+      console.log(`[getForecastForPeriod] Empty data array for ${period}`);
+      return null;
+    }
+
+    // Get forecast based on period
+    let targetHour;
+    if (period === 'morning') targetHour = 8; // 08:00
+    else if (period === 'afternoon') targetHour = 14; // 14:00
+    else if (period === 'evening') targetHour = 20; // 20:00
+
+    // Find closest forecast to target hour from data array
+    let closestForecast = null;
+    let minDiff = Infinity;
+
+    dataArray.forEach((item, index) => {
+      if (!item || !item.local_datetime) return;
+
+      try {
+        const hour = parseInt(item.local_datetime.split('T')[1].split(':')[0]);
+        const diff = Math.abs(hour - targetHour);
+
+        console.log(`[getForecastForPeriod] ${period} - Index ${index}: Hour ${hour}, Diff ${diff}, Temp ${item.t}`);
+
+        if (diff < minDiff) {
+          minDiff = diff;
+          closestForecast = item;
+        }
+      } catch (e) {
+        console.warn(`[getForecastForPeriod] Error parsing datetime at index ${index}:`, e);
+      }
+    });
+
+    // Fallback to first forecast if no close match
+    if (!closestForecast && dataArray.length > 0) {
+      closestForecast = dataArray[0];
+      console.log(`[getForecastForPeriod] Using fallback (first) for ${period}`);
+    }
+
+    if (!closestForecast) {
+      console.log(`[getForecastForPeriod] No forecast found for ${period}`);
+      return null;
+    }
+
+    const result = {
+      time: period === 'morning' ? 'Pagi' : period === 'afternoon' ? 'Siang' : 'Sore',
+      temperature: closestForecast.t,
+      condition: closestForecast.weather_desc,
+      humidity: closestForecast.hu,
+      icon: closestForecast.image ? '🌤️' : '☀️', // Use default icons for now
+    };
+
+    console.log(`[getForecastForPeriod] ${period} result:`, result);
+    return result;
+  };
+
+  useEffect(() => {
+    const loadLocationAndWeather = async () => {
+      try {
+        setWeatherLoading(true);
+        setLocationError(null);
+
+        // Default fallback location (Jakarta)
+        const defaultLocation = {
+          latitude: -6.2088,
+          longitude: 106.8456,
+          name: 'Jakarta',
+          bmkgCode: '31.71.03.1001', // Kemayoran, Jakarta Pusat
+        };
+
+        let finalLocation = defaultLocation;
+        let displayLocation = 'Jakarta';
+
+        // Try to get location permission
+        try {
+          const { status } = await Location.requestForegroundPermissionsAsync();
+
+          if (status === 'granted') {
+            // Permission granted, try to get current location
+            try {
+              const location = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.High, // Use High accuracy for better results
+                timeout: 10000, // 10 second timeout
+              });
+
+              console.log('[DynamicHeader] 📍 GPS Coordinates:', {
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+                accuracy: location.coords.accuracy,
+              });
+
+              const [place] = await Location.reverseGeocodeAsync({
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+              });
+
+              displayLocation =
+                place?.district ||
+                place?.city ||
+                place?.region ||
+                place?.subregion ||
+                'Lokasi Saat Ini';
+
+              finalLocation = {
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+                name: displayLocation,
+                bmkgCode: '31.71.03.1001', // Still use Jakarta code for now
+              };
+
+              console.log('[DynamicHeader] ✅ Location obtained:', {
+                name: displayLocation,
+                lat: location.coords.latitude,
+                lon: location.coords.longitude,
+              });
+            } catch (locationError) {
+              console.warn('[DynamicHeader] ⚠️ Failed to get location, using default:', locationError.message);
+              // Keep using default location
+            }
+          } else {
+            console.log('[DynamicHeader] ℹ️ Location permission denied, using default location');
+          }
+        } catch (permissionError) {
+          console.warn('[DynamicHeader] ⚠️ Permission request failed, using default:', permissionError.message);
+          // Keep using default location
+        }
+
+        // Get realtime weather from existing API
+        try {
+          console.log('[DynamicHeader] 🌤️ Fetching weather for coordinates:', {
+            lat: finalLocation.latitude,
+            lon: finalLocation.longitude,
+          });
+
+          const weatherResponse = await apiService.getWeather(
+            finalLocation.latitude,
+            finalLocation.longitude
+          );
+
+          console.log('[DynamicHeader] 🌤️ Weather API Response:', weatherResponse);
+
+          if (weatherResponse.success && weatherResponse.data) {
+            const { temperature, condition, main, forecast } = weatherResponse.data;
+            setWeatherInfo({
+              location: displayLocation,
+              temperature: Math.round(temperature),
+              condition,
+            });
+
+            console.log('[DynamicHeader] ✅ Realtime weather loaded:', {
+              location: displayLocation,
+              lat: finalLocation.latitude,
+              lon: finalLocation.longitude,
+              temp: Math.round(temperature),
+              condition,
+              main,
+              forecast,
+            });
+
+            // Helper function to get weather icon based on temperature and condition
+            const getWeatherIcon = (weatherMain, temperature) => {
+              console.log('[getWeatherIcon] Called with:', { weatherMain, temperature });
+
+              // Indonesian climate rule: Temperature below 30°C = Rainy/Cloudy weather
+              if (temperature < 30) {
+                // Below 28°C = Rain icon (gerimis/hujan ringan)
+                if (temperature < 28) {
+                  console.log('[getWeatherIcon] Temperature < 28°C, returning Rain icon 🌧️');
+                  return '🌧️';
+                }
+                // 28-29°C = Cloudy icon
+                console.log('[getWeatherIcon] Temperature 28-29°C, returning Cloudy icon ☁️');
+                return '☁️';
+              }
+
+              // Temperature >= 30°C, use actual weather condition from API
+              console.log('[getWeatherIcon] Temperature >= 30°C, using API condition:', weatherMain);
+              const mainLower = (weatherMain || '').toLowerCase();
+              if (mainLower === 'rain') return '🌧️';
+              if (mainLower === 'drizzle') return '🌧️';
+              if (mainLower === 'thunderstorm') return '⛈️';
+              if (mainLower === 'clouds') return '☁️';
+              if (mainLower === 'clear') return '☀️';
+              if (mainLower === 'fog' || mainLower === 'mist') return '🌫️';
+              return '🌤️';
+            };
+
+            // ONLY use real forecast data from Open-Meteo API - no assumptions/fallback
+            if (forecast && forecast.morning && forecast.afternoon && forecast.evening) {
+              console.log('[DynamicHeader] 🌡️ Temperature-based icon calculation:', {
+                morning: { temp: forecast.morning.temperature, main: forecast.morning.main },
+                afternoon: { temp: forecast.afternoon.temperature, main: forecast.afternoon.main },
+                evening: { temp: forecast.evening.temperature, main: forecast.evening.main },
+              });
+
+              const morningIcon = getWeatherIcon(forecast.morning.main, forecast.morning.temperature);
+              const afternoonIcon = getWeatherIcon(forecast.afternoon.main, forecast.afternoon.temperature);
+              const eveningIcon = getWeatherIcon(forecast.evening.main, forecast.evening.temperature);
+
+              setWeatherForecast({
+                morning: {
+                  time: 'Pagi',
+                  temperature: forecast.morning.temperature,
+                  condition: forecast.morning.condition,
+                  icon: morningIcon,
+                },
+                afternoon: {
+                  time: 'Siang',
+                  temperature: forecast.afternoon.temperature,
+                  condition: forecast.afternoon.condition,
+                  icon: afternoonIcon,
+                },
+                evening: {
+                  time: 'Sore',
+                  temperature: forecast.evening.temperature,
+                  condition: forecast.evening.condition,
+                  icon: eveningIcon,
+                },
+              });
+
+              console.log('[DynamicHeader] 📊 Real 3-period forecast from Open-Meteo API:', {
+                morning: { icon: morningIcon, temp: forecast.morning.temperature, main: forecast.morning.main },
+                afternoon: { icon: afternoonIcon, temp: forecast.afternoon.temperature, main: forecast.afternoon.main },
+                evening: { icon: eveningIcon, temp: forecast.evening.temperature, main: forecast.evening.main },
+              });
+            } else {
+              console.warn('[DynamicHeader] ⚠️ Forecast data incomplete from API, not showing forecast badge');
+            }
+          } else {
+            console.warn('[DynamicHeader] ⚠️ Weather API returned no data');
+            setWeatherInfo({
+              location: displayLocation,
+              temperature: null,
+              condition: 'Cuaca tidak tersedia',
+            });
+          }
+        } catch (weatherError) {
+          console.error('[DynamicHeader] ❌ Weather fetch failed:', weatherError);
+          setWeatherInfo({
+            location: displayLocation,
+            temperature: null,
+            condition: 'Cuaca tidak tersedia',
+          });
+        }
+      } catch (error) {
+        console.error('[DynamicHeader] ❌ Error in loadLocationAndWeather:', error);
+        // Fallback to basic display
+        setWeatherInfo({
+          location: 'Jakarta',
+          temperature: null,
+          condition: 'Cuaca tidak tersedia',
+        });
+      } finally {
+        setWeatherLoading(false);
+      }
+    };
+
+    loadLocationAndWeather();
   }, []);
 
   const handleLogout = async () => {
@@ -52,12 +337,54 @@ export default function DynamicHeader({
     );
   };
 
-  const formatTime = (date) => {
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    return `${hours}:${minutes}:${seconds}`;
+  const getJakartaDate = (date) => {
+    const utc = date.getTime() + date.getTimezoneOffset() * 60000;
+    return new Date(utc + 7 * 60 * 60000);
   };
+
+  const formatDayName = (date) => {
+    const gmt7Date = getJakartaDate(date);
+    try {
+      const day = new Intl.DateTimeFormat('id-ID', { weekday: 'long', timeZone: 'Asia/Jakarta' }).format(gmt7Date);
+      return day.charAt(0).toUpperCase() + day.slice(1);
+    } catch {
+      const fallback = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+      return fallback[gmt7Date.getDay()];
+    }
+  };
+
+  const formatTime = (date) => {
+    const gmt7Date = getJakartaDate(date);
+    try {
+      return new Intl.DateTimeFormat('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Jakarta',
+      }).format(gmt7Date);
+    } catch {
+      const hours = String(gmt7Date.getHours()).padStart(2, '0');
+      const minutes = String(gmt7Date.getMinutes()).padStart(2, '0');
+      return `${hours}:${minutes}`;
+    }
+  };
+
+  const dayLabel = formatDayName(currentTime);
+  const timeLabel = formatTime(currentTime);
+  const conditionLabel = weatherInfo.condition || '';
+  const conditionEmoji = (() => {
+    const condition = conditionLabel.toLowerCase();
+    if (condition.includes('cerah')) return '☀️';
+    if (condition.includes('hujan')) return '🌧️';
+    if (condition.includes('badai')) return '⛈️';
+    if (condition.includes('mendung') || condition.includes('awan')) return '⛅';
+    if (condition.includes('kabut')) return '🌫️';
+    return '🌦️';
+  })();
+  const weatherLabel = `${dayLabel}, ${timeLabel} WIB`;
+  const locationLabel =
+    weatherInfo.temperature != null
+      ? `${weatherInfo.location} • ${weatherInfo.temperature}°C`
+      : weatherInfo.location;
 
   return (
     <>
@@ -73,19 +400,62 @@ export default function DynamicHeader({
         </View>
 
         <View style={styles.headerRight}>
-          {/* Drone Code Badge */}
-          <View style={styles.droneBadge}>
-            <Text style={styles.droneIcon}>📷</Text>
-            <Text style={styles.droneText}>
-              {session?.drone?.drone_code || 'Drone-001'}
-            </Text>
+          {/* Area Code Badge */}
+          {session?.area_code && session.area_code.length > 0 && (
+            <View style={styles.areaBadge}>
+              <Text style={styles.areaIcon}>📍</Text>
+              <Text style={styles.areaText}>
+                {session.area_code.join(', ')}
+              </Text>
+            </View>
+          )}
+
+          {/* Location & Time Badge */}
+          <View style={styles.weatherBadge}>
+            {weatherLoading ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <View style={styles.locationRow}>
+                <Text style={styles.weatherLocation}>{weatherInfo.location}</Text>
+                <Text style={styles.weatherSeparator}>•</Text>
+                <Text style={styles.weatherTime}>{weatherLabel}</Text>
+              </View>
+            )}
           </View>
 
-          {/* Clock Badge */}
-          <View style={styles.clockBadge}>
-            <Text style={styles.clockIcon}>🕐</Text>
-            <Text style={styles.clockText}>{formatTime(currentTime)}</Text>
-          </View>
+          {/* 3-Period Forecast Badge */}
+          {!weatherLoading && weatherForecast.morning && weatherForecast.afternoon && weatherForecast.evening && (
+            <View style={styles.forecastBadge}>
+              <View style={styles.forecastTimeline}>
+                {/* Morning */}
+                <View style={styles.forecastPeriod}>
+                  <Text style={styles.forecastIcon}>{weatherForecast.morning.icon}</Text>
+                  <Text style={styles.forecastLabel}>Pagi</Text>
+                  <Text style={styles.forecastTemp}>{weatherForecast.morning.temperature}°</Text>
+                </View>
+
+                {/* Connector */}
+                <View style={styles.timelineConnector} />
+
+                {/* Afternoon */}
+                <View style={styles.forecastPeriod}>
+                  <Text style={styles.forecastIcon}>{weatherForecast.afternoon.icon}</Text>
+                  <Text style={styles.forecastLabel}>Siang</Text>
+                  <Text style={styles.forecastTemp}>{weatherForecast.afternoon.temperature}°</Text>
+                </View>
+
+                {/* Connector */}
+                <View style={styles.timelineConnector} />
+
+                {/* Evening */}
+                <View style={styles.forecastPeriod}>
+                  <Text style={styles.forecastIcon}>{weatherForecast.evening.icon}</Text>
+                  <Text style={styles.forecastLabel}>Sore</Text>
+                  <Text style={styles.forecastTemp}>{weatherForecast.evening.temperature}°</Text>
+                </View>
+              </View>
+            </View>
+          )}
 
           {/* Burger Menu Button */}
           <TouchableOpacity
@@ -114,18 +484,27 @@ export default function DynamicHeader({
         <View style={styles.settingsMenu}>
           {/* Theme Toggle */}
           <View style={styles.menuItem}>
-            <Text style={styles.menuItemText}>Dark Mode</Text>
+            <Text style={styles.menuItemText}>White Mode</Text>
             <Switch
-              value={isDarkMode}
+              value={!isDarkMode}
               onValueChange={(value) => {
-                if (onThemeToggle) {
-                  onThemeToggle(value);
-                }
+                toggleTheme();
               }}
-              trackColor={{ false: '#D1D5DB', true: '#0EA5E9' }}
-              thumbColor={isDarkMode ? '#FFFFFF' : '#F3F4F6'}
-              ios_backgroundColor="#D1D5DB"
+              trackColor={{ false: 'rgba(14,165,233,0.45)', true: '#D1D5DB' }}
+              thumbColor={!isDarkMode ? '#FFFFFF' : '#0EA5E9'}
+              ios_backgroundColor="rgba(14,165,233,0.45)"
             />
+          </View>
+
+          {/* Divider */}
+          <View style={styles.menuDivider} />
+
+          {/* Drone Code Info */}
+          <View style={styles.menuInfoItem}>
+            <Text style={styles.droneMenuIcon}>🚁</Text>
+            <Text style={styles.droneMenuText}>
+              {session?.drone?.drone_code || 'Drone-001'}
+            </Text>
           </View>
 
           {/* Divider */}
@@ -172,7 +551,7 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'center',
   },
-  droneBadge: {
+  areaBadge: {
     backgroundColor: 'rgba(255,255,255,0.25)',
     paddingVertical: 8,
     paddingHorizontal: 16,
@@ -181,29 +560,93 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  droneIcon: {
+  areaIcon: {
     fontSize: 16,
   },
-  droneText: {
+  areaText: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '600',
   },
-  clockBadge: {
+  weatherBadge: {
     backgroundColor: 'rgba(255,255,255,0.25)',
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 20,
+    minHeight: 40,
+    justifyContent: 'center',
+  },
+  forecastBadge: {
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    minHeight: 40,
+    justifyContent: 'center',
+  },
+  weatherContainer: {
+    gap: 4,
+  },
+  locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 4,
   },
-  clockIcon: {
+  weatherLocation: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  weatherSeparator: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 10,
+  },
+  weatherTime: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  forecastTimeline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 0,
+  },
+  forecastPeriod: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  forecastIcon: {
     fontSize: 16,
   },
-  clockText: {
+  forecastLabel: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 9,
+    fontWeight: '600',
+  },
+  forecastTemp: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  timelineConnector: {
+    width: 12,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.4)',
+    marginHorizontal: 6,
+  },
+  fallbackWeather: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  weatherIcon: {
+    fontSize: 16,
+  },
+  weatherTemp: {
+    color: '#FFFFFF',
+    fontSize: 12,
     fontWeight: '600',
   },
   burgerButton: {
@@ -255,6 +698,20 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#E5E7EB',
     marginVertical: 8,
+  },
+  menuInfoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 12,
+  },
+  droneMenuIcon: {
+    fontSize: 18,
+  },
+  droneMenuText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#374151',
   },
   logoutButton: {
     flexDirection: 'row',

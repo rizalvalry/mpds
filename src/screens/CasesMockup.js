@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Dimensions, Image, Modal, RefreshControl, ActivityIndicator, Alert } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import ImageViewer from 'react-native-image-zoom-viewer';
 import apiService from '../services/ApiService';
 import DynamicHeader from '../components/shared/DynamicHeader';
 import { useTheme } from '../contexts/ThemeContext';
@@ -298,13 +298,11 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
   };
 
   const handleImagePress = (caseItem) => {
+    console.log('[CasesMockup] handleImagePress - caseItem.images:', JSON.stringify(caseItem.images, null, 2));
+    console.log('[CasesMockup] handleImagePress - Full caseItem keys:', Object.keys(caseItem));
     setSelectedImage(caseItem.images);
     setImageViewIndex(0); // Start with detected image
     setImageModalVisible(true);
-  };
-
-  const toggleImageView = () => {
-    setImageViewIndex(prev => prev === 0 ? 1 : 0);
   };
 
   // New feature handlers
@@ -354,9 +352,33 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
     try {
       const response = await apiService.validateCase(selectedCase.id, statusId);
       if (response.success) {
+        // SPA-style: Update local state immediately without full reload
+        // Map statusId to status name for UI update
+        const statusMap = {
+          1: { id: 1, name: 'Not Started' },
+          2: { id: 2, name: 'In Progress' },
+          3: { id: 3, name: 'Completed' },
+          4: { id: 4, name: 'Failed' },
+        };
+
+        const newStatus = statusMap[statusId] || { id: statusId, name: 'Unknown' };
+
+        // Update the specific case in local state (real-time update)
+        setCasesData(prevCases =>
+          prevCases.map(c =>
+            c.id === selectedCase.id
+              ? { ...c, status: newStatus, is_confirmed: true }
+              : c
+          )
+        );
+
+        console.log('[CasesMockup] Real-time update: Case', selectedCase.id, 'status changed to', newStatus.name);
+
         Alert.alert('Success', 'Case validated successfully');
         setShowValidationDialog(false);
-        loadCases();
+        setSelectedCase(null);
+
+        // No need to call loadCases() - state is already updated
       }
     } catch (error) {
       console.error('[CasesMockup] Error validating case:', error);
@@ -603,7 +625,7 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
                   CASES OVERVIEW
                 </Text>
                 <Text style={{ fontSize: 14, color: '#6B7280' }}>
-                  {pagination?.row_count || casesData.length} Total Cases
+                  {pagination?.row_count || casesData.length} Total Cases (Today)
                 </Text>
               </View>
             </View>
@@ -795,6 +817,54 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
                 🚫 Not Started
               </Text>
             </TouchableOpacity>
+
+            {/* True Detection Filter (statusId = 4) * matikan dulu saat ini/}
+            {/* <TouchableOpacity
+              onPress={() => {
+                setFilterIsConfirmed(null);
+                setFilterStatus(4); // statusId 4 = True Detection
+              }}
+              style={{
+                paddingVertical: 6,
+                paddingHorizontal: 12,
+                borderRadius: 16,
+                backgroundColor: filterStatus === 4 ? '#22C55E' : '#F3F4F6',
+                borderWidth: 1,
+                borderColor: filterStatus === 4 ? '#22C55E' : '#E5E7EB',
+              }}
+            >
+              <Text style={{
+                fontSize: 12,
+                fontWeight: '600',
+                color: filterStatus === 4 ? '#FFFFFF' : '#6B7280',
+              }}>
+                ✅ True
+              </Text>
+            </TouchableOpacity> */}
+
+            {/* False Detection Filter (statusId = 5) * matikan dulu saat ini/}
+            {/* <TouchableOpacity
+              onPress={() => {
+                setFilterIsConfirmed(null);
+                setFilterStatus(5); // statusId 5 = False Detection
+              }}
+              style={{
+                paddingVertical: 6,
+                paddingHorizontal: 12,
+                borderRadius: 16,
+                backgroundColor: filterStatus === 5 ? '#EF4444' : '#F3F4F6',
+                borderWidth: 1,
+                borderColor: filterStatus === 5 ? '#EF4444' : '#E5E7EB',
+              }}
+            >
+              <Text style={{
+                fontSize: 12,
+                fontWeight: '600',
+                color: filterStatus === 5 ? '#FFFFFF' : '#6B7280',
+              }}>
+                ❌ False
+              </Text>
+            </TouchableOpacity> */}
           </View>
 
           {/* Quick Stats */}
@@ -1176,98 +1246,103 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
         </View>
       </Modal>
 
-      {/* Image Viewer Modal */}
+      {/* Image Viewer Modal with Swipe & Zoom */}
       <Modal
         visible={imageModalVisible}
         transparent={true}
         animationType="fade"
         onRequestClose={() => setImageModalVisible(false)}
       >
-        <View style={{
-          flex: 1,
-          backgroundColor: 'rgba(0,0,0,0.9)',
-          justifyContent: 'center',
-          alignItems: 'center',
-        }}>
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
           {/* Close Button */}
           <TouchableOpacity
             onPress={() => setImageModalVisible(false)}
             style={{
               position: 'absolute',
-              top: 40,
+              top: 50,
               right: 20,
-              width: 44,
-              height: 44,
-              borderRadius: 22,
+              width: 40,
+              height: 40,
+              borderRadius: 20,
               backgroundColor: 'rgba(255,255,255,0.2)',
               justifyContent: 'center',
               alignItems: 'center',
-              zIndex: 10,
+              zIndex: 999,
             }}
           >
-            <Text style={{ fontSize: 24, color: '#FFFFFF' }}>✕</Text>
+            <Text style={{ fontSize: 20, color: '#FFFFFF' }}>✕</Text>
           </TouchableOpacity>
 
-          {/* Image Title */}
-          <View style={{
-            position: 'absolute',
-            top: 40,
-            left: 20,
-            right: 80,
-            zIndex: 10,
-          }}>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: '#FFFFFF' }}>
-              {imageViewIndex === 0 ? 'Detected Image' : 'Original Image'}
-            </Text>
-            <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', marginTop: 4 }}>
-              Swipe or tap toggle button to switch view
-            </Text>
-          </View>
-
-          {/* Image Display */}
+          {/* Image Zoom Viewer */}
           {selectedImage && (
-            <View style={{ width: width * 0.9, height: width * 0.9 }}>
-              <Image
-                source={{
-                  uri: imageViewIndex === 0
-                    ? selectedImage.case_photo
-                    : selectedImage.origin_photo
-                }}
-                style={{
+            <ImageViewer
+              imageUrls={[
+                { url: selectedImage.case_photo || selectedImage.thumbnail, props: { source: { uri: selectedImage.case_photo || selectedImage.thumbnail } } },
+                { url: selectedImage.origin_photo || selectedImage.thumbnail, props: { source: { uri: selectedImage.origin_photo || selectedImage.thumbnail } } },
+              ]}
+              index={imageViewIndex}
+              onChange={(index) => setImageViewIndex(index)}
+              enableSwipeDown={true}
+              onSwipeDown={() => setImageModalVisible(false)}
+              backgroundColor="transparent"
+              saveToLocalByLongPress={false}
+              enablePreload={true}
+              renderIndicator={(currentIndex, allSize) => (
+                <View style={{
+                  position: 'absolute',
+                  top: 55,
+                  left: 20,
+                  right: 70,
+                  zIndex: 100,
+                }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#FFFFFF' }}>
+                    {currentIndex === 1 ? 'Detected' : 'Original'}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 4 }}>
+                    {currentIndex} / {allSize}
+                  </Text>
+                </View>
+              )}
+              renderFooter={() => (
+                <View style={{
                   width: '100%',
-                  height: '100%',
-                  borderRadius: 12,
-                }}
-                resizeMode="contain"
-              />
-            </View>
+                  paddingBottom: 40,
+                  alignItems: 'center',
+                }}>
+                  {/* Page Indicator Dots */}
+                  <View style={{
+                    flexDirection: 'row',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    gap: 8,
+                    marginBottom: 10,
+                  }}>
+                    <View style={{
+                      width: imageViewIndex === 0 ? 24 : 8,
+                      height: 8,
+                      borderRadius: 4,
+                      backgroundColor: imageViewIndex === 0 ? '#0EA5E9' : 'rgba(255,255,255,0.4)',
+                    }} />
+                    <View style={{
+                      width: imageViewIndex === 1 ? 24 : 8,
+                      height: 8,
+                      borderRadius: 4,
+                      backgroundColor: imageViewIndex === 1 ? '#0EA5E9' : 'rgba(255,255,255,0.4)',
+                    }} />
+                  </View>
+                  <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
+                    Swipe to switch • Pinch to zoom • Swipe down to close
+                  </Text>
+                </View>
+              )}
+              footerContainerStyle={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+              }}
+            />
           )}
-
-          {/* Toggle Button */}
-          <TouchableOpacity
-            onPress={toggleImageView}
-            style={{
-              position: 'absolute',
-              bottom: 40,
-              backgroundColor: '#0EA5E9',
-              paddingVertical: 14,
-              paddingHorizontal: 32,
-              borderRadius: 24,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              shadowColor: '#0EA5E9',
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.5,
-              shadowRadius: 12,
-              elevation: 8,
-            }}
-          >
-            <Text style={{ fontSize: 20 }}>↔️</Text>
-            <Text style={{ fontSize: 16, fontWeight: '600', color: '#FFFFFF' }}>
-              {imageViewIndex === 0 ? 'Show Original' : 'Show Detected'}
-            </Text>
-          </TouchableOpacity>
         </View>
       </Modal>
     </View>

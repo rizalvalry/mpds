@@ -30,17 +30,13 @@ export default function ChooseDroneScreen({ loginResponse, setSession }) {
 
   return (
     <View style={styles.container}>
-      {/* Premium Background */}
+      {/* Clean Gradient Background - matching login screen */}
       <LinearGradient
-        colors={['#0A0E27', '#1a1f3a', '#0047AB', '#1E90FF']}
+        colors={['#e6f2ff', '#f0f8ff', '#ffffff']}
         start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+        end={{ x: 0, y: 1 }}
         style={styles.backgroundGradient}
       >
-        {/* Decorative Circles */}
-        <View style={[styles.circle, styles.circle1]} />
-        <View style={[styles.circle, styles.circle2]} />
-
         <Animated.View
           style={[
             styles.content,
@@ -49,67 +45,54 @@ export default function ChooseDroneScreen({ loginResponse, setSession }) {
             },
           ]}
         >
-          {/* Header */}
+          {/* Elegant Header */}
           <View style={styles.headerSection}>
             <Text style={styles.mainTitle}>Motor Pool Drone Systems</Text>
-            <View style={styles.dividerLine} />
-            <Text style={styles.subtitle}>Drone Selection</Text>
+            <Text style={styles.subtitle}>Drone Information</Text>
           </View>
 
-          {/* Drone Selection Card */}
-          <BlurView intensity={20} tint="dark" style={styles.droneCard}>
-            <LinearGradient
-              colors={['rgba(255,255,255,0.15)', 'rgba(255,255,255,0.05)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.glassGradient}
+          {/* Clean Drone Info Card */}
+          <View style={styles.droneCard}>
+            {/* Drone Code */}
+            <View style={styles.infoGroup}>
+              <Text style={styles.infoLabel}>Drone Code</Text>
+              <View style={styles.infoBox}>
+                <Text style={styles.infoValue}>
+                  {loginResponse?.drone?.drone_code || 'N/A'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Operator */}
+            <View style={styles.infoGroup}>
+              <Text style={styles.infoLabel}>Operator</Text>
+              <View style={styles.infoBox}>
+                <Text style={styles.infoValue}>
+                  {loginResponse?.username || 'Unknown'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Proceed Button */}
+            <TouchableOpacity
+              onPress={handleNext}
+              style={styles.proceedButtonContainer}
+              activeOpacity={0.8}
             >
-              {/* <Text style={styles.cardTitle}>SELECTED DRONE</Text> */}
-
-              {/* Drone Icon */}
-              {/* <View style={styles.droneIconContainer}>
-                <Text style={styles.droneIcon}>🚁</Text>
-              </View> */}
-
-              {/* Drone Code Display */}
-              <View style={styles.droneInfoContainer}>
-                <Text style={styles.droneLabel}>DRONE CODE</Text>
-                <View style={styles.droneCodeBox}>
-                  <Text style={styles.droneCode}>
-                    {loginResponse?.drone?.drone_code || 'N/A'}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Operator Info */}
-              <View style={styles.operatorInfo}>
-                <Text style={styles.operatorLabel}>OPERATOR</Text>
-                <Text style={styles.operatorName}>{loginResponse?.username || 'Unknown'}</Text>
-              </View>
-
-              {/* Next Button */}
-              <TouchableOpacity
-                onPress={handleNext}
-                style={styles.nextButtonContainer}
-                activeOpacity={0.8}
+              <LinearGradient
+                colors={['#00BFFF', '#1E90FF', '#0047AB']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.proceedButton}
               >
-                <LinearGradient
-                  colors={['#00BFFF', '#1E90FF', '#0047AB']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.nextButton}
-                >
-                  <Text style={styles.nextButtonText}>PROCEED</Text>
-                  <Text style={styles.nextButtonArrow}>→</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </LinearGradient>
-          </BlurView>
+                <Text style={styles.proceedButtonText}>Continue</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
 
           {/* Footer */}
           <View style={styles.footer}>
-            <View style={styles.footerDivider} />
-            <Text style={styles.footerText}>POWERED BY BSI RESEARCH & DEVELOPMENT</Text>
+            <Text style={styles.footerVersion}>Version 1.0.0</Text>
           </View>
         </Animated.View>
       </LinearGradient>
@@ -123,26 +106,6 @@ const styles = StyleSheet.create({
   },
   backgroundGradient: {
     flex: 1,
-    position: 'relative',
-  },
-  circle: {
-    position: 'absolute',
-    borderRadius: 9999,
-    opacity: 0.1,
-  },
-  circle1: {
-    width: 400,
-    height: 400,
-    backgroundColor: '#00BFFF',
-    top: -100,
-    right: -100,
-  },
-  circle2: {
-    width: 300,
-    height: 300,
-    backgroundColor: '#1E90FF',
-    bottom: -50,
-    left: -50,
   },
   content: {
     flex: 1,
@@ -150,154 +113,93 @@ const styles = StyleSheet.create({
     paddingHorizontal: width > 768 ? width * 0.25 : 32,
     paddingVertical: 40,
   },
+  // Elegant Header
   headerSection: {
     alignItems: 'center',
     marginBottom: 40,
   },
   mainTitle: {
     fontSize: width > 768 ? 32 : 26,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: 1,
+    fontWeight: '700',
+    color: '#0047AB',
     textAlign: 'center',
-    textShadowColor: 'rgba(0, 191, 255, 0.5)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 20,
-  },
-  dividerLine: {
-    width: 80,
-    height: 2,
-    backgroundColor: '#00BFFF',
-    marginVertical: 12,
-    borderRadius: 2,
+    marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#00BFFF',
-    letterSpacing: 1.5,
+    color: '#666',
+    fontWeight: '500',
   },
+  // Clean Drone Info Card
   droneCard: {
-    borderRadius: 24,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.5,
-    shadowRadius: 30,
-    elevation: 20,
-  },
-  glassGradient: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
     padding: 32,
-    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
   },
   cardTitle: {
-    fontSize: 12,
+    fontSize: 24,
     fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 2,
+    color: '#0047AB',
     marginBottom: 24,
     textAlign: 'center',
   },
-  droneIconContainer: {
-    alignItems: 'center',
-    marginBottom: 24,
+  // Info Groups
+  infoGroup: {
+    marginBottom: 20,
   },
-  droneIcon: {
-    fontSize: 72,
-    textShadowColor: 'rgba(0, 191, 255, 0.5)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 20,
-  },
-  droneInfoContainer: {
-    marginBottom: 24,
-  },
-  droneLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.7)',
-    letterSpacing: 1.5,
-    marginBottom: 12,
-  },
-  droneCodeBox: {
-    backgroundColor: 'rgba(0, 191, 255, 0.2)',
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 2,
-    borderColor: '#00BFFF',
-    alignItems: 'center',
-  },
-  droneCode: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: '#00BFFF',
-    letterSpacing: 3,
-    textShadowColor: 'rgba(0, 191, 255, 0.8)',
-    textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 10,
-  },
-  operatorInfo: {
-    marginBottom: 32,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
-    padding: 16,
-  },
-  operatorLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.6)',
-    letterSpacing: 1.5,
-    marginBottom: 6,
-  },
-  operatorName: {
-    fontSize: 16,
+  infoLabel: {
+    fontSize: 13,
     fontWeight: '600',
-    color: '#FFFFFF',
-    letterSpacing: 0.5,
+    color: '#0047AB',
+    marginBottom: 8,
   },
-  nextButtonContainer: {
+  infoBox: {
+    backgroundColor: '#F5F9FF',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  infoValue: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '600',
+  },
+  // Proceed Button
+  proceedButtonContainer: {
+    marginTop: 12,
     borderRadius: 12,
     overflow: 'hidden',
-    shadowColor: '#00BFFF',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.6,
-    shadowRadius: 16,
-    elevation: 12,
+    shadowColor: '#1E90FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
-  nextButton: {
-    flexDirection: 'row',
+  proceedButton: {
+    paddingVertical: 16,
+    paddingHorizontal: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
-    paddingHorizontal: 32,
-    gap: 12,
   },
-  nextButtonText: {
+  proceedButtonText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-    letterSpacing: 2,
-  },
-  nextButtonArrow: {
-    color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '700',
+    letterSpacing: 0.5,
   },
+  // Footer
   footer: {
     alignItems: 'center',
-    marginTop: 40,
+    marginTop: 32,
   },
-  footerDivider: {
-    width: 60,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    marginBottom: 16,
-  },
-  footerText: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
-    letterSpacing: 2,
+  footerVersion: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '500',
   },
 });

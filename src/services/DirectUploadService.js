@@ -5,17 +5,14 @@
  */
 
 const PROD_BASE_URL = 'https://droneark.bsi.co.id';
-const DEV_BASE_URL = 'https://rnd-dev.bsi.co.id';
 
 export class DirectUploadService {
   constructor(useProd = true) {
-    this.baseUrl = useProd ? PROD_BASE_URL : DEV_BASE_URL;
+    this.baseUrl = PROD_BASE_URL;
     this.useProd = useProd;
 
     // Direct upload endpoint - uploads directly to Azure Blob Storage (folder input)
-    this.uploadUrl = useProd
-      ? `${PROD_BASE_URL}/drone/upload/api/v1/upload/file`
-      : `${DEV_BASE_URL}/drone/upload/api/v1/upload/file`;
+    this.uploadUrl = `${PROD_BASE_URL}/drone/upload/api/v1/upload/file`;
   }
 
   /**

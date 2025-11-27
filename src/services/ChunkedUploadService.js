@@ -7,7 +7,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  */
 
 const CHUNK_SIZE = 512 * 1024; // 512KB - exact match with Flutter
-const DEV_BASE_URL = 'rnd-dev.bsi.co.id';
 const PROD_BASE_URL = 'droneark.bsi.co.id';
 
 /**
@@ -24,15 +23,11 @@ function generateUUID() {
 
 export class ChunkedUploadService {
   constructor(useProd = true) {
-    this.baseUrl = useProd ? PROD_BASE_URL : DEV_BASE_URL;
+    this.baseUrl = PROD_BASE_URL;
     this.useProd = useProd;
 
-    // CORRECT URL based on Azure Ingress configuration
-    // Production: Use chunked upload endpoint
-    // Development: Use direct upload endpoint (no chunking)
-    this.uploadUrl = useProd
-      ? 'https://droneark.bsi.co.id/services/upload/api/v1/upload/chunk'
-      : 'https://rnd-dev.bsi.co.id/drone/upload/api/v1/upload/file';
+    // Production chunked upload endpoint
+    this.uploadUrl = 'https://droneark.bsi.co.id/services/upload/api/v1/upload/chunk';
   }
 
   // Initialize - backend doesn't require authentication
