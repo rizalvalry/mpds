@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,13 +12,15 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
+import apiService from '../services/ApiService';
+import PusherService from '../services/PusherService';
 
 const { width } = Dimensions.get('window');
 
-// TODO: Replace with actual API calls when endpoints are ready
-const API_BASE_URL = 'https://droneark.bsi.co.id/api';
+// Polling configuration
+const POLLING_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
 
-export default function MonitoringScreen({ session, setSession, activeMenu, setActiveMenu, isDarkMode }) {
+export default function MonitoringScreen({ session, activeMenu, setActiveMenu, isDarkMode }) {
   const [blockProgress, setBlockProgress] = useState({
     inProgress: [], // [{ area: 'A', processed: 17, total: 300 }]
     complete: [],   // [{ area: 'B', processed: 250, total: 250 }]
@@ -28,6 +30,11 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
   const [pulseAnim] = useState(new Animated.Value(1));
   const [currentTime, setCurrentTime] = useState(new Date());
   const [lastUpdateTime, setLastUpdateTime] = useState(null);
+  const [dataSource, setDataSource] = useState('initializing'); // 'pusher', 'polling', 'initializing'
+
+  // Refs for timers and connection tracking
+  const pollingIntervalRef = useRef(null);
+  const pusherConnectedRef = useRef(false);
 
   // Theme
   const theme = {
@@ -39,7 +46,6 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
   // Get area codes from session (from login response)
   const userAreaCodes = session?.area_code || [];
   const droneCode = session?.drone?.drone_code || 'N/A';
-  const username = session?.username || 'User';
 
   // Update time every second
   useEffect(() => {
@@ -72,60 +78,105 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
     }
   }, [loading]);
 
-  // Initial load and auto-refresh every 10 seconds
-  useEffect(() => {
-    fetchStats();
-    const interval = setInterval(() => {
-      fetchStats();
-    }, 10000); // Refresh every 10 seconds
+  // Initialize Pusher connection
+  const initializePusher = useCallback(() => {
+    try {
+      console.log('[Monitoring] Attempting to connect to Pusher...');
+      const connected = PusherService.connect(handlePusherEvent);
 
-    return () => clearInterval(interval);
+      if (connected) {
+        pusherConnectedRef.current = true;
+        setDataSource('pusher');
+        console.log('[Monitoring] ✅ Pusher connected - using real-time updates');
+      } else {
+        pusherConnectedRef.current = false;
+        setDataSource('polling');
+        console.log('[Monitoring] ⚠️ Pusher connection failed - using polling fallback');
+      }
+    } catch (error) {
+      console.error('[Monitoring] Pusher initialization error:', error);
+      pusherConnectedRef.current = false;
+      setDataSource('polling');
+    }
+  }, [handlePusherEvent]);
+
+  // Disconnect Pusher
+  const disconnectPusher = useCallback(() => {
+    try {
+      PusherService.disconnect();
+      pusherConnectedRef.current = false;
+      console.log('[Monitoring] Pusher disconnected');
+    } catch (error) {
+      console.error('[Monitoring] Error disconnecting Pusher:', error);
+    }
   }, []);
 
-  // Fetch monitoring statistics from API
-  const fetchStats = async () => {
+  // Handle Pusher real-time events
+  const handlePusherEvent = useCallback((data) => {
+    console.log('[Monitoring] 📥 Pusher event received:', data);
+
+    // When Pusher event received, refresh data from API
+    // This ensures we get accurate aggregated data
+    fetchStatsFromAPI();
+  }, [fetchStatsFromAPI]);
+
+  // Start polling (every 5 minutes)
+  const startPolling = useCallback(() => {
+    console.log('[Monitoring] Starting polling interval (5 minutes)...');
+
+    // Clear existing interval if any
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+    }
+
+    // Setup new polling interval
+    pollingIntervalRef.current = setInterval(() => {
+      console.log('[Monitoring] 🔄 Polling: Fetching data from API...');
+      fetchStatsFromAPI();
+    }, POLLING_INTERVAL);
+  }, [fetchStatsFromAPI]);
+
+  // Stop polling
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+      console.log('[Monitoring] Polling stopped');
+    }
+  }, []);
+
+  // Fetch monitoring statistics from API (Bird Drop Per Block endpoint)
+  const fetchStatsFromAPI = useCallback(async () => {
     try {
       setLoading(true);
-      console.log('[Monitoring] Fetching stats from API...');
+      console.log('[Monitoring] Fetching block progress from API...');
 
-      // TODO: Replace with actual API call
-      // const response = await fetch(`${API_BASE_URL}/upload/today`, {
-      //   headers: {
-      //     'Authorization': `Bearer ${session?.session_token}`,
-      //   },
-      // });
-      // const data = await response.json();
+      // Fetch data from getDashboardBDPerBlock API
+      const response = await apiService.getDashboardBDPerBlock('today');
 
-      // MOCK DATA for testing (remove when API is ready)
-      const mockData = [
-        {
-          id: 1,
-          operator: 'DP003',
-          start_uploads: 530,
-          end_uploads: 0,
-          area_handle: ['C', 'D', 'K', 'L'],
-          status: 'in_progress',
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: 2,
-          operator: 'DP005',
-          start_uploads: 316,
-          end_uploads: 316,
-          area_handle: ['B', 'K'],
-          status: 'completed',
-          created_at: new Date().toISOString(),
-        },
-      ];
+      if (response.success && response.data) {
+        console.log('[Monitoring] ✅ API data received:', response.data);
 
-      // Process data and calculate block progress
-      calculateBlockProgress(mockData);
-      setLastUpdateTime(new Date());
+        // Transform API data to block progress format
+        transformAPIDataToBlockProgress(response.data);
+        setLastUpdateTime(new Date());
+      } else {
+        console.warn('[Monitoring] ⚠️ API returned no data or failed:', response);
 
-      console.log('[Monitoring] Stats updated successfully');
+        // Check if error is due to Pusher quota exceeded
+        if (response.message && (
+          response.message.includes('Rate limit exceeded') ||
+          response.message.includes('Message quota exceeded')
+        )) {
+          console.log('[Monitoring] Pusher quota exceeded - switching to polling mode');
+          setDataSource('polling');
+          disconnectPusher();
+        }
+      }
     } catch (error) {
-      console.error('[Monitoring] Error fetching stats:', error);
-      // Don't show alert on auto-refresh errors
+      console.error('[Monitoring] Error fetching stats from API:', error);
+
+      // Don't show alert on background refresh errors
       if (refreshing) {
         Alert.alert('Error', 'Failed to fetch monitoring data. Please try again.');
       }
@@ -133,57 +184,70 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [refreshing, disconnectPusher, transformAPIDataToBlockProgress]);
 
-  // Calculate block progress from upload data
-  const calculateBlockProgress = (uploadData) => {
-    const inProgress = [];
-    const complete = [];
-    const areaMap = {}; // { 'C': { total: 530, processed: 17 } }
+  // Transform API data (Bird Drop Per Block) to block progress format
+  const transformAPIDataToBlockProgress = useCallback((apiData) => {
+    try {
+      const inProgress = [];
+      const complete = [];
 
-    // Aggregate by area code
-    uploadData.forEach((upload) => {
-      upload.area_handle.forEach((area) => {
-        if (!areaMap[area]) {
-          areaMap[area] = {
-            total: 0,
-            processed: 0, // TODO: Get from Pusher or API
-          };
+      // apiData format: [{ area_code: 'A', total: 100, true_detection: 80, false_detection: 20 }]
+      apiData.forEach((block) => {
+        const blockData = {
+          area: block.area_code,
+          processed: block.true_detection + block.false_detection, // Total processed
+          total: block.total, // Total cases
+        };
+
+        // Categorize as complete or in progress
+        if (blockData.processed >= blockData.total && blockData.total > 0) {
+          complete.push(blockData);
+        } else if (blockData.total > 0) {
+          inProgress.push(blockData);
         }
-        areaMap[area].total += upload.start_uploads;
-        // TODO: Add processed count from backend
-        // For now, mock some progress
-        areaMap[area].processed += Math.floor(upload.end_uploads / upload.area_handle.length);
       });
-    });
 
-    // Split into In Progress and Complete
-    Object.entries(areaMap).forEach(([area, data]) => {
-      const blockData = {
-        area,
-        processed: data.processed,
-        total: data.total,
-      };
+      // Sort by area code
+      inProgress.sort((a, b) => a.area.localeCompare(b.area));
+      complete.sort((a, b) => a.area.localeCompare(b.area));
 
-      if (data.processed >= data.total && data.total > 0) {
-        complete.push(blockData);
-      } else {
-        inProgress.push(blockData);
-      }
-    });
+      setBlockProgress({ inProgress, complete });
+      console.log('[Monitoring] Block progress updated:', {
+        inProgressCount: inProgress.length,
+        completeCount: complete.length
+      });
+    } catch (error) {
+      console.error('[Monitoring] Error transforming API data:', error);
+    }
+  }, []);
 
-    // Sort by area code
-    inProgress.sort((a, b) => a.area.localeCompare(b.area));
-    complete.sort((a, b) => a.area.localeCompare(b.area));
+  // Initial load and setup hybrid system (Pusher + Polling fallback)
+  useEffect(() => {
+    console.log('[Monitoring] Initializing hybrid monitoring system...');
 
-    setBlockProgress({ inProgress, complete });
-  };
+    // Initial data fetch
+    fetchStatsFromAPI();
+
+    // Try to connect to Pusher for real-time updates
+    initializePusher();
+
+    // Setup polling as fallback (every 5 minutes)
+    startPolling();
+
+    // Cleanup on unmount
+    return () => {
+      console.log('[Monitoring] Cleaning up monitoring system...');
+      stopPolling();
+      disconnectPusher();
+    };
+  }, [fetchStatsFromAPI, initializePusher, startPolling, stopPolling, disconnectPusher]);
 
   // Pull to refresh handler
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    fetchStats();
-  }, []);
+    fetchStatsFromAPI();
+  }, [fetchStatsFromAPI]);
 
   // Format time ago
   const getTimeAgo = () => {
@@ -388,10 +452,17 @@ export default function MonitoringScreen({ session, setSession, activeMenu, setA
               </View>
             </View>
 
-            {/* Last Update Time */}
+            {/* Last Update Time & Data Source */}
             <View style={styles.lastUpdateContainer}>
-              <Text style={styles.lastUpdateText}>Last Update: {getTimeAgo()}</Text>
-              <TouchableOpacity onPress={fetchStats} style={styles.refreshButton}>
+              <View>
+                <Text style={styles.lastUpdateText}>Last Update: {getTimeAgo()}</Text>
+                <Text style={styles.dataSourceText}>
+                  {dataSource === 'pusher' && '📡 Real-time (Pusher)'}
+                  {dataSource === 'polling' && '🔄 Polling (5 min)'}
+                  {dataSource === 'initializing' && '⏳ Initializing...'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={fetchStatsFromAPI} style={styles.refreshButton}>
                 <Text style={styles.refreshButtonText}>🔄 Refresh</Text>
               </TouchableOpacity>
             </View>
@@ -776,6 +847,13 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#00BFFF',
     fontWeight: '600',
+  },
+  dataSourceText: {
+    fontSize: 8,
+    color: '#0EA5E9',
+    fontWeight: '500',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   refreshButton: {
     backgroundColor: 'rgba(0,191,255,0.15)',
