@@ -5,44 +5,77 @@
 
 import * as FileSystem from 'expo-file-system';
 import * as ImageManipulator from 'expo-image-manipulator';
+import piexif from 'piexifjs';
 
 /**
- * Extract GPS coordinates from image EXIF data
+ * Extract GPS coordinates from image EXIF data using piexifjs
  *
- * @param {string} imageUri - Image URI from expo-image-picker
+ * @param {string} imageUri - Image URI from document picker or file system
  * @returns {Promise<{latitude: number, longitude: number} | null>}
  */
 export const extractGPSFromImage = async (imageUri) => {
   try {
     console.log('[ExifExtractor] Extracting GPS from:', imageUri);
 
-    // Read image metadata using expo-image-manipulator
-    // Note: expo-image-manipulator doesn't provide EXIF directly
-    // We need to use expo-media-library or react-native-exif packages
+    // Read image as base64
+    const base64 = await FileSystem.readAsStringAsync(imageUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
 
-    // For React Native Expo, we'll use fetch with expo-file-system
-    const imageInfo = await FileSystem.getInfoAsync(imageUri, { size: true });
+    // Add data URI prefix for piexifjs
+    const dataUri = `data:image/jpeg;base64,${base64}`;
 
-    if (!imageInfo.exists) {
-      console.error('[ExifExtractor] Image does not exist:', imageUri);
-      return null;
+    // Extract EXIF data using piexifjs
+    const exifData = piexif.load(dataUri);
+
+    if (exifData.GPS && Object.keys(exifData.GPS).length > 0) {
+      const gps = exifData.GPS;
+
+      // Extract GPS coordinates
+      const latDMS = gps[piexif.GPSIFD.GPSLatitude];
+      const latRef = gps[piexif.GPSIFD.GPSLatitudeRef];
+      const lonDMS = gps[piexif.GPSIFD.GPSLongitude];
+      const lonRef = gps[piexif.GPSIFD.GPSLongitudeRef];
+
+      if (latDMS && lonDMS) {
+        // Convert DMS array to decimal degrees
+        const latitude = convertGPSToDD(latDMS, latRef);
+        const longitude = convertGPSToDD(lonDMS, lonRef);
+
+        console.log('[ExifExtractor] GPS extracted from file:', { latitude, longitude });
+        return { latitude, longitude };
+      }
     }
 
-    // Try to extract EXIF using native module or expo-media-library
-    // This is a simplified version - you may need to install expo-media-library
-
-    // TEMPORARY SOLUTION: Parse from filename if available
-    // OR use expo-media-library.getAssetInfoAsync() for real EXIF
-
-    console.warn('[ExifExtractor] EXIF extraction requires expo-media-library or react-native-exif');
-    console.warn('[ExifExtractor] Returning null - please install dependencies');
-
+    console.warn('[ExifExtractor] No GPS data found in EXIF');
     return null;
 
   } catch (error) {
     console.error('[ExifExtractor] Error extracting GPS:', error);
     return null;
   }
+};
+
+/**
+ * Convert GPS DMS format from piexifjs to decimal degrees
+ *
+ * @param {Array} dms - [[degrees, 1], [minutes, 1], [seconds, precision]]
+ * @param {string} ref - Reference (N/S for latitude, E/W for longitude)
+ * @returns {number}
+ */
+const convertGPSToDD = (dms, ref) => {
+  const degrees = dms[0][0] / dms[0][1];
+  const minutes = dms[1][0] / dms[1][1];
+  const seconds = dms[2][0] / dms[2][1];
+
+  let dd = degrees + (minutes / 60) + (seconds / 3600);
+
+  // Apply reference (negative for S and W)
+  if (ref === 'S' || ref === 'W') {
+    dd = -dd;
+  }
+
+  return dd;
 };
 
 /**
@@ -74,6 +107,17 @@ export const extractGPSFromAsset = async (asset) => {
 
         console.log('[ExifExtractor] GPS extracted from EXIF:', { latitude: lat, longitude: lon });
         return { latitude: lat, longitude: lon };
+      }
+    }
+
+    // Fallback: Try to extract from file URI directly (for DocumentPicker)
+    if (asset.uri) {
+      console.log('[ExifExtractor] No EXIF in asset object, trying to read from URI...');
+      const gpsFromFile = await extractGPSFromImage(asset.uri);
+
+      if (gpsFromFile) {
+        console.log('[ExifExtractor] GPS extracted from file URI:', gpsFromFile);
+        return gpsFromFile;
       }
     }
 
