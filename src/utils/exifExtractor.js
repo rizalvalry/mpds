@@ -17,9 +17,9 @@ export const extractGPSFromImage = async (imageUri) => {
   try {
     console.log('[ExifExtractor] Extracting GPS from:', imageUri);
 
-    // Read image as base64
+    // Read image as base64 (use string 'base64' instead of EncodingType.Base64)
     const base64 = await FileSystem.readAsStringAsync(imageUri, {
-      encoding: FileSystem.EncodingType.Base64,
+      encoding: 'base64',
     });
 
     // Add data URI prefix for piexifjs
