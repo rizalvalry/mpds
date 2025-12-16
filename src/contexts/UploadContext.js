@@ -253,12 +253,17 @@ export const UploadProvider = ({ children }) => {
 
       // Create upload details entry in backend for Monitoring screen
       if (session?.drone) {
+        // Extract area_codes - if array, take first element; if string, use as-is
+        const areaHandle = Array.isArray(session.drone.area_codes)
+          ? session.drone.area_codes[0]
+          : session.drone.area_codes || 'UNKNOWN';
+
         const uploadDetailsPayload = {
           operator: session.drone.drone_code || 'UNKNOWN',
           status: 'active',
           startUploads: images.length,
           endUploads: 0,
-          areaHandle: session.drone.area_codes || [],
+          areaHandle: areaHandle, // Send as string, e.g., "C"
         };
 
         console.log(`[UploadContext] Creating upload details:`, uploadDetailsPayload);
