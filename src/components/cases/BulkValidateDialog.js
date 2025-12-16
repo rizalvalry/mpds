@@ -12,39 +12,18 @@ import {
 import { BlurView } from 'expo-blur';
 import { Picker } from '@react-native-picker/picker';
 
-export default function BulkAssignDialog({
+export default function BulkValidateDialog({
   visible,
   onClose,
   workers,
   areas,
-  onBulkAssign,
-  onBulkAreaConfirm
+  onBulkValidate
 }) {
   const [selectedWorker, setSelectedWorker] = useState(null);
   const [selectedAreas, setSelectedAreas] = useState([]);
-  const [selectedStatus, setSelectedStatus] = useState(4); // Default: 4 = True/Confirmed
   const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingAreaConfirm, setIsLoadingAreaConfirm] = useState(false);
 
-  const handleBulkAssign = async () => {
-    if (!selectedWorker) {
-      Alert.alert('Error', 'Please select a worker first');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      await onBulkAssign(selectedWorker);
-      setSelectedWorker(null);
-      onClose();
-    } catch (error) {
-      Alert.alert('Error', 'Failed to assign workers');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleBulkAreaConfirm = async () => {
+  const handleBulkValidate = async () => {
     if (!selectedWorker) {
       Alert.alert('Error', 'Please select a worker first');
       return;
@@ -55,17 +34,17 @@ export default function BulkAssignDialog({
       return;
     }
 
-    setIsLoadingAreaConfirm(true);
+    setIsLoading(true);
     try {
-      await onBulkAreaConfirm(selectedWorker, selectedAreas, selectedStatus);
+      // statusId = 2 untuk Bulk Validate (Progress)
+      await onBulkValidate(selectedWorker, selectedAreas, 2);
       setSelectedWorker(null);
       setSelectedAreas([]);
-      setSelectedStatus(4);
       onClose();
     } catch (error) {
-      Alert.alert('Error', 'Failed to bulk confirm area cases');
+      Alert.alert('Error', 'Failed to bulk validate cases');
     } finally {
-      setIsLoadingAreaConfirm(false);
+      setIsLoading(false);
     }
   };
 
@@ -82,7 +61,6 @@ export default function BulkAssignDialog({
   const handleCancel = () => {
     setSelectedWorker(null);
     setSelectedAreas([]);
-    setSelectedStatus(4);
     onClose();
   };
 
@@ -97,9 +75,9 @@ export default function BulkAssignDialog({
         <BlurView intensity={100} tint="dark" style={styles.modalBlur}>
           <ScrollView contentContainerStyle={styles.scrollContent}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Bulk Assign Workers</Text>
+              <Text style={styles.modalTitle}>Bulk Validate Cases</Text>
               <Text style={styles.modalDescription}>
-                Assign workers to cases or bulk confirm by area
+                Select worker and areas to bulk validate cases (Status: Validated)
               </Text>
 
               {/* Worker Picker */}
@@ -124,16 +102,16 @@ export default function BulkAssignDialog({
                 </View>
               </View>
 
-              {/* Area Selection (for Bulk Area Confirm) */}
+              {/* Area Selection */}
               <View style={styles.areaContainer}>
                 <View style={styles.areaHeaderRow}>
-                  <Text style={styles.pickerLabel}>Select Areas (for Bulk Area Confirm):</Text>
+                  <Text style={styles.pickerLabel}>Select Areas:</Text>
                   <Text style={styles.areaCount}>
                     {selectedAreas.length} of {areas?.length || 0} selected
                   </Text>
                 </View>
                 <Text style={styles.areaHint}>
-                  Choose one or more areas for bulk area confirm
+                  Choose one or more areas to validate
                 </Text>
                 <ScrollView
                   style={styles.areaScrollContainer}
@@ -170,20 +148,12 @@ export default function BulkAssignDialog({
                 </ScrollView>
               </View>
 
-              {/* Status Picker (for Bulk Area Confirm) */}
-              <View style={styles.pickerContainer}>
-                <Text style={styles.pickerLabel}>Select Status (for Bulk Area Confirm):</Text>
-                <View style={styles.pickerWrapper}>
-                  <Picker
-                    selectedValue={selectedStatus}
-                    onValueChange={(itemValue) => setSelectedStatus(itemValue)}
-                    style={styles.picker}
-                    dropdownIconColor="#0047AB"
-                  >
-                    <Picker.Item label="Confirmed (True)" value={4} />
-                    <Picker.Item label="False Detection" value={5} />
-                  </Picker>
-                </View>
+              {/* Status Info */}
+              <View style={styles.statusInfoContainer}>
+                <Text style={styles.statusInfoIcon}>ℹ️</Text>
+                <Text style={styles.statusInfoText}>
+                  Cases will be set to status: <Text style={styles.statusInfoBold}>Progress (ID: 2)</Text>
+                </Text>
               </View>
 
               {/* Action Buttons */}
@@ -191,7 +161,7 @@ export default function BulkAssignDialog({
                 <TouchableOpacity
                   style={[styles.button, styles.cancelButton]}
                   onPress={handleCancel}
-                  disabled={isLoading || isLoadingAreaConfirm}
+                  disabled={isLoading}
                 >
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </TouchableOpacity>
@@ -199,32 +169,19 @@ export default function BulkAssignDialog({
                 <TouchableOpacity
                   style={[
                     styles.button,
-                    styles.assignButton,
-                    (isLoading || !selectedWorker) && styles.disabledButton,
+                    styles.validateButton,
+                    (isLoading || !selectedWorker || selectedAreas.length === 0) && styles.disabledButton,
                   ]}
-                  onPress={handleBulkAssign}
-                  disabled={isLoading || isLoadingAreaConfirm || !selectedWorker}
+                  onPress={handleBulkValidate}
+                  disabled={isLoading || !selectedWorker || selectedAreas.length === 0}
                 >
                   {isLoading ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
-                    <Text style={styles.assignButtonText}>Bulk Assign</Text>
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.button,
-                    styles.confirmButton,
-                    (isLoadingAreaConfirm || !selectedWorker || selectedAreas.length === 0) && styles.disabledButton,
-                  ]}
-                  onPress={handleBulkAreaConfirm}
-                  disabled={isLoading || isLoadingAreaConfirm || !selectedWorker || selectedAreas.length === 0}
-                >
-                  {isLoadingAreaConfirm ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <Text style={styles.confirmButtonText}>Bulk Area Confirm</Text>
+                    <>
+                      <Text style={styles.validateButtonIcon}>✓</Text>
+                      <Text style={styles.validateButtonText}>Bulk Validate</Text>
+                    </>
                   )}
                 </TouchableOpacity>
               </View>
@@ -384,10 +341,33 @@ const styles = StyleSheet.create({
     color: '#00BAFF',
     fontWeight: '600',
   },
+  statusInfoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E0F7FF',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#00EBFF',
+  },
+  statusInfoIcon: {
+    fontSize: 18,
+    marginRight: 8,
+  },
+  statusInfoText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#006B7D',
+    lineHeight: 18,
+  },
+  statusInfoBold: {
+    fontWeight: '700',
+    color: '#004D5C',
+  },
   buttonContainer: {
     flexDirection: 'row',
     gap: 8,
-    marginTop: 8,
   },
   button: {
     flex: 1,
@@ -395,29 +375,27 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44,
+    minHeight: 48,
   },
   cancelButton: {
     backgroundColor: '#E0E0E0',
   },
   cancelButtonText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
     color: '#666',
   },
-  assignButton: {
+  validateButton: {
     backgroundColor: '#00D9FF',
+    flexDirection: 'row',
   },
-  assignButtonText: {
-    fontSize: 12,
-    fontWeight: '700',
+  validateButtonIcon: {
+    fontSize: 16,
+    marginRight: 6,
     color: '#fff',
   },
-  confirmButton: {
-    backgroundColor: '#00BAFF',
-  },
-  confirmButtonText: {
-    fontSize: 11,
+  validateButtonText: {
+    fontSize: 13,
     fontWeight: '700',
     color: '#fff',
   },

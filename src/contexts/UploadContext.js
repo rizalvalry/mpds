@@ -1,5 +1,7 @@
-import React, { createContext, useContext, useState, useRef } from 'react';
+import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
 import { Alert } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import chunkedUploadService from '../services/ChunkedUploadService';
 import apiService from '../services/ApiService';
 
@@ -21,9 +23,198 @@ export const UploadProvider = ({ children }) => {
   const [uploadStats, setUploadStats] = useState({ total: 0, success: 0, error: 0 });
   const [fileProgress, setFileProgress] = useState({}); // { fileId: { progress, status, fileName } }
   const [uploadedFiles, setUploadedFiles] = useState([]); // Keep track of files being uploaded
+
+  // Retry mechanism state (like Flutter)
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [hasPendingUploads, setHasPendingUploads] = useState(false);
+
   const uploadAbortRef = useRef(false);
+  const retryTimerRef = useRef(null);
+  const connectivityUnsubscribeRef = useRef(null);
+  const pendingUploadRef = useRef(null); // Store pending upload state
 
   const BATCH_SIZE = 5;
+  const RETRY_INTERVAL = 5000; // 5 seconds (like Flutter)
+  const PENDING_UPLOADS_KEY = '@pending_uploads';
+
+  // Setup connectivity listener (like Flutter's _setupConnectivityListener)
+  useEffect(() => {
+    // Load pending uploads on mount
+    loadPendingUploads();
+
+    // Listen for connectivity changes
+    const unsubscribe = NetInfo.addEventListener(state => {
+      const hasConnection = state.isConnected && state.isInternetReachable !== false;
+
+      if (hasConnection && isRetrying) {
+        console.log('[UploadContext] 🌐 Connection restored - resuming upload...');
+        clearRetryTimer();
+        setIsRetrying(false);
+        resumeUpload();
+      }
+    });
+
+    connectivityUnsubscribeRef.current = unsubscribe;
+
+    // Cleanup on unmount
+    return () => {
+      if (connectivityUnsubscribeRef.current) {
+        connectivityUnsubscribeRef.current();
+      }
+      clearRetryTimer();
+    };
+  }, [isRetrying]); // Re-run when isRetrying changes
+
+  // Save pending uploads to AsyncStorage (like Flutter's _savePendingUploads)
+  const savePendingUploads = async (images, session, completedFileIds = []) => {
+    try {
+      // Only save files that haven't been uploaded
+      const pendingFiles = images.filter(img => !completedFileIds.includes(img.id));
+
+      if (pendingFiles.length > 0) {
+        const uploadState = {
+          images: pendingFiles,
+          session,
+          completedFileIds,
+          timestamp: new Date().toISOString(),
+        };
+
+        await AsyncStorage.setItem(PENDING_UPLOADS_KEY, JSON.stringify(uploadState));
+        setHasPendingUploads(true);
+        console.log(`[UploadContext] 💾 Saved ${pendingFiles.length} pending uploads`);
+      } else {
+        // All files uploaded, clear pending uploads
+        await AsyncStorage.removeItem(PENDING_UPLOADS_KEY);
+        setHasPendingUploads(false);
+        console.log(`[UploadContext] ✅ All uploads complete - cleared pending uploads`);
+      }
+    } catch (error) {
+      console.error('[UploadContext] Error saving pending uploads:', error);
+    }
+  };
+
+  // Load pending uploads from AsyncStorage (like Flutter's _loadPendingUploads)
+  const loadPendingUploads = async () => {
+    try {
+      const pendingData = await AsyncStorage.getItem(PENDING_UPLOADS_KEY);
+      if (pendingData) {
+        const uploadState = JSON.parse(pendingData);
+        const pendingCount = uploadState.images?.length || 0;
+
+        if (pendingCount > 0) {
+          pendingUploadRef.current = uploadState;
+          setHasPendingUploads(true);
+          console.log(`[UploadContext] 📂 Found ${pendingCount} pending uploads from previous session`);
+
+          // Show alert to user
+          Alert.alert(
+            'Pending Uploads Found',
+            `Found ${pendingCount} pending uploads from previous session. Would you like to resume?`,
+            [
+              {
+                text: 'Cancel',
+                style: 'cancel',
+                onPress: () => clearPendingUploads(),
+              },
+              {
+                text: 'Resume',
+                onPress: () => resumePendingUploads(),
+              },
+            ]
+          );
+        }
+      }
+    } catch (error) {
+      console.error('[UploadContext] Error loading pending uploads:', error);
+    }
+  };
+
+  // Resume pending uploads from previous session
+  const resumePendingUploads = async () => {
+    if (pendingUploadRef.current) {
+      const { images, session, completedFileIds } = pendingUploadRef.current;
+      console.log(`[UploadContext] 🔄 Resuming ${images.length} pending uploads...`);
+
+      // Filter out already completed files
+      const remainingFiles = images.filter(img => !completedFileIds.includes(img.id));
+
+      if (remainingFiles.length > 0) {
+        await startUpload(remainingFiles, session);
+      } else {
+        await clearPendingUploads();
+      }
+    }
+  };
+
+  // Clear pending uploads
+  const clearPendingUploads = async () => {
+    try {
+      await AsyncStorage.removeItem(PENDING_UPLOADS_KEY);
+      pendingUploadRef.current = null;
+      setHasPendingUploads(false);
+      console.log('[UploadContext] 🗑️ Cleared pending uploads');
+    } catch (error) {
+      console.error('[UploadContext] Error clearing pending uploads:', error);
+    }
+  };
+
+  // Clear retry timer (like Flutter's _connectivityRetryTimer?.cancel())
+  const clearRetryTimer = () => {
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  };
+
+  // Start retry mechanism (like Flutter's _startRetryMechanism)
+  const startRetryMechanism = async () => {
+    setIsRetrying(true);
+    console.log(`[UploadContext] ⏸️ Connection lost - will retry in ${RETRY_INTERVAL / 1000} seconds...`);
+
+    // Alert user
+    Alert.alert(
+      'Connection Lost',
+      `Upload paused. Will retry in ${RETRY_INTERVAL / 1000} seconds when connection is restored...`,
+      [{ text: 'OK' }]
+    );
+
+    // Setup retry timer (like Flutter's Timer.periodic)
+    const checkConnection = async () => {
+      const networkState = await NetInfo.fetch();
+      const hasConnection = networkState.isConnected && networkState.isInternetReachable !== false;
+
+      if (hasConnection) {
+        console.log('[UploadContext] 🌐 Connection restored via timer - resuming...');
+        clearRetryTimer();
+        setIsRetrying(false);
+        Alert.alert('Connection Restored', 'Resuming upload...', [{ text: 'OK' }]);
+        resumeUpload();
+      } else {
+        // Retry again after interval
+        retryTimerRef.current = setTimeout(checkConnection, RETRY_INTERVAL);
+      }
+    };
+
+    retryTimerRef.current = setTimeout(checkConnection, RETRY_INTERVAL);
+  };
+
+  // Resume upload after connection restored (like Flutter's resumeUpload)
+  const resumeUpload = async () => {
+    if (pendingUploadRef.current && !isUploading) {
+      const { images, session, completedFileIds } = pendingUploadRef.current;
+
+      // Filter out completed files
+      const remainingFiles = images.filter(img => !completedFileIds.includes(img.id));
+
+      if (remainingFiles.length > 0) {
+        console.log(`[UploadContext] 🔄 Resuming upload for ${remainingFiles.length} files...`);
+        await startUpload(remainingFiles, session);
+      } else {
+        console.log(`[UploadContext] ✅ All files already uploaded`);
+        await clearPendingUploads();
+      }
+    }
+  };
 
   const startUpload = async (images, session = null) => {
     if (images.length === 0) return;
@@ -48,6 +239,14 @@ export const UploadProvider = ({ children }) => {
     });
     setFileProgress(initialFileProgress);
     setUploadedFiles(images);
+
+    // Store pending upload state for retry mechanism
+    pendingUploadRef.current = {
+      images,
+      session,
+      completedFileIds: [],
+    };
+    await savePendingUploads(images, session, []);
 
     try {
       console.log(`[UploadContext] Starting batch upload: ${images.length} images in ${totalBatchCount} batches`);
@@ -109,6 +308,16 @@ export const UploadProvider = ({ children }) => {
                 fileName: fileName || prev[fileId]?.fileName,
               }
             }));
+
+            // Update completed files list for retry mechanism
+            if (progress >= 100 && pendingUploadRef.current) {
+              const completedIds = [...pendingUploadRef.current.completedFileIds];
+              if (!completedIds.includes(fileId)) {
+                completedIds.push(fileId);
+                pendingUploadRef.current.completedFileIds = completedIds;
+                savePendingUploads(images, session, completedIds);
+              }
+            }
           }
         }
       );
@@ -134,27 +343,53 @@ export const UploadProvider = ({ children }) => {
         error: result.summary.error,
       });
 
+      // Clear pending uploads on success
+      await clearPendingUploads();
+
       // Return result for caller
       return result;
 
     } catch (error) {
       console.error('[UploadContext] Upload error:', error);
-      // Mark all files as error
-      setFileProgress(prev => {
-        const updated = { ...prev };
-        Object.keys(updated).forEach(id => {
-          if (updated[id].status !== 'completed') {
-            updated[id].status = 'error';
-          }
+
+      // Check if it's a connection error
+      if (error.message && (
+        error.message.includes('Network') ||
+        error.message.includes('connection') ||
+        error.message.includes('fetch') ||
+        error.message.includes('timeout')
+      )) {
+        console.log('[UploadContext] 🔌 Network error detected - starting retry mechanism...');
+        startRetryMechanism();
+
+        // Don't mark files as error yet - they're paused for retry
+        return {
+          success: false,
+          paused: true,
+          message: 'Upload paused due to connection error. Will retry automatically.'
+        };
+      } else {
+        // Other errors - mark all files as error
+        setFileProgress(prev => {
+          const updated = { ...prev };
+          Object.keys(updated).forEach(id => {
+            if (updated[id].status !== 'completed') {
+              updated[id].status = 'error';
+            }
+          });
+          return updated;
         });
-        return updated;
-      });
-      throw error;
+        await clearPendingUploads();
+        throw error;
+      }
     } finally {
-      setIsUploading(false);
-      setCurrentBatch(0);
-      setTotalBatches(0);
-      setBatchProgress({});
+      // Only clear upload state if not retrying
+      if (!isRetrying) {
+        setIsUploading(false);
+        setCurrentBatch(0);
+        setTotalBatches(0);
+        setBatchProgress({});
+      }
       // DON'T clear fileProgress and uploadedFiles - keep them for display
     }
   };
@@ -163,14 +398,19 @@ export const UploadProvider = ({ children }) => {
     setFileProgress({});
     setUploadedFiles([]);
     setUploadStats({ total: 0, success: 0, error: 0 });
+    clearPendingUploads();
   };
 
   const cancelUpload = () => {
     uploadAbortRef.current = true;
     setIsUploading(false);
+    setIsRetrying(false);
     setCurrentBatch(0);
     setTotalBatches(0);
     setBatchProgress({});
+    clearRetryTimer();
+    clearPendingUploads();
+    console.log('[UploadContext] ❌ Upload cancelled by user');
   };
 
   return (
@@ -183,9 +423,13 @@ export const UploadProvider = ({ children }) => {
         uploadStats,
         fileProgress,
         uploadedFiles,
+        isRetrying,
+        hasPendingUploads,
         startUpload,
         cancelUpload,
         clearUploadHistory,
+        resumePendingUploads,
+        clearPendingUploads,
         BATCH_SIZE,
       }}
     >
@@ -193,24 +437,5 @@ export const UploadProvider = ({ children }) => {
     </UploadContext.Provider>
   );
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

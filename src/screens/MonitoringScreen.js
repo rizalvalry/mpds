@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
-  Dimensions,
   Animated,
   RefreshControl,
 } from 'react-native';
@@ -14,8 +13,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import apiService from '../services/ApiService';
 import PusherService from '../services/PusherService';
-
-const { width } = Dimensions.get('window');
 
 // Polling configuration
 const POLLING_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
@@ -30,11 +27,22 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
   const [pulseAnim] = useState(new Animated.Value(1));
   const [currentTime, setCurrentTime] = useState(new Date());
   const [lastUpdateTime, setLastUpdateTime] = useState(null);
-  const [dataSource, setDataSource] = useState('initializing'); // 'pusher', 'polling', 'initializing'
 
-  // Refs for timers and connection tracking
+  // Real-time progress from pusher (aggregate count per block)
+  // Format: { 'A': { detected: 50, undetected: 30, total_processed: 80 }, 'B': {...} }
+  const [pusherProgress, setPusherProgress] = useState({});
+
+  // Enhanced metrics state for comparing UploadDetails vs bird_drops_by_block
+  const [comparisonMetrics, setComparisonMetrics] = useState({
+    totalUploaded: 0,      // From UploadDetails API (start_uploads sum)
+    totalInSystem: 0,      // From bird_drops_by_block API (total sum)
+    totalDetected: 0,      // From bird_drops_by_block API (true_detection + false_detection)
+    completionRate: 0,     // (totalDetected / totalUploaded) * 100
+    sessionCount: 0,       // Number of upload sessions today
+  });
+
+  // Refs for timers
   const pollingIntervalRef = useRef(null);
-  const pusherConnectedRef = useRef(false);
 
   // Theme
   const theme = {
@@ -78,47 +86,199 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
     }
   }, [loading]);
 
-  // Initialize Pusher connection
-  const initializePusher = useCallback(() => {
-    try {
-      console.log('[Monitoring] Attempting to connect to Pusher...');
-      const connected = PusherService.connect(handlePusherEvent);
+  // Pusher listener for real-time progress updates (aggregate batches)
+  useEffect(() => {
+    console.log('[Monitoring] Initializing pusher for block-progress events...');
 
-      if (connected) {
-        pusherConnectedRef.current = true;
-        setDataSource('pusher');
-        console.log('[Monitoring] ✅ Pusher connected - using real-time updates');
-      } else {
-        pusherConnectedRef.current = false;
-        setDataSource('polling');
-        console.log('[Monitoring] ⚠️ Pusher connection failed - using polling fallback');
+    // Subscribe to block-progress channel
+    const progressChannel = PusherService.subscribe('block-progress');
+
+    // Bind event handler for aggregate progress updates
+    progressChannel.bind('block-progress', (data) => {
+      console.log('[Monitoring] 📩 Received block-progress event:', data);
+
+      const areaCode = data.area_code;
+      const detectedCount = data.detected_count || 0;
+      const undetectedCount = data.undetected_count || 0;
+      const totalProcessed = data.total_processed || 0;
+
+      if (areaCode) {
+        // SET progress (not increment) - this avoids lost events issue
+        setPusherProgress((prev) => ({
+          ...prev,
+          [areaCode]: {
+            detected: detectedCount,
+            undetected: undetectedCount,
+            total_processed: totalProcessed,
+          },
+        }));
+
+        console.log(`[Monitoring] Updated progress for Block ${areaCode}:`, {
+          detected: detectedCount,
+          undetected: undetectedCount,
+          total_processed: totalProcessed,
+        });
       }
-    } catch (error) {
-      console.error('[Monitoring] Pusher initialization error:', error);
-      pusherConnectedRef.current = false;
-      setDataSource('polling');
-    }
-  }, [handlePusherEvent]);
+    });
 
-  // Disconnect Pusher
-  const disconnectPusher = useCallback(() => {
-    try {
-      PusherService.disconnect();
-      pusherConnectedRef.current = false;
-      console.log('[Monitoring] Pusher disconnected');
-    } catch (error) {
-      console.error('[Monitoring] Error disconnecting Pusher:', error);
-    }
+    // Cleanup: Unbind and unsubscribe on unmount
+    return () => {
+      console.log('[Monitoring] Cleaning up pusher subscriptions...');
+      progressChannel.unbind('block-progress');
+      PusherService.unsubscribe('block-progress');
+    };
   }, []);
 
-  // Handle Pusher real-time events
-  const handlePusherEvent = useCallback((data) => {
-    console.log('[Monitoring] 📥 Pusher event received:', data);
+  // Helper: Get today's date in YYYY-MM-DD format (Asia/Jakarta timezone)
+  const getTodayDate = useCallback(() => {
+    const now = new Date();
+    const jakartaDateString = now.toLocaleString('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return jakartaDateString.split(',')[0];
+  }, []);
 
-    // When Pusher event received, refresh data from API
-    // This ensures we get accurate aggregated data
-    fetchStatsFromAPI();
-  }, [fetchStatsFromAPI]);
+  // Transform data: UploadDetails (total) + Pusher (real-time progress)
+  // HYBRID: UploadDetails for total, Pusher for real-time detected/undetected counts
+  const transformAPIDataToBlockProgress = useCallback((birdDropsData, uploadDetailsData) => {
+    try {
+      const inProgress = [];
+      const complete = [];
+
+      // Create map of total uploaded per block from UploadDetails
+      const uploadedPerBlock = {};
+      uploadDetailsData.forEach((session) => {
+        const areaHandle = session.area_handle; // Now string format from backend
+        const startUploads = session.start_uploads || 0;
+        if (areaHandle) {
+          uploadedPerBlock[areaHandle] = (uploadedPerBlock[areaHandle] || 0) + startUploads;
+        }
+      });
+
+      // Process each block that has uploads
+      Object.keys(uploadedPerBlock).forEach((areaCode) => {
+        const totalUploaded = uploadedPerBlock[areaCode];
+
+        // Get real-time progress from pusher (if available)
+        const pusherData = pusherProgress[areaCode];
+        const detectedCount = pusherData?.detected || 0;
+        const undetectedCount = pusherData?.undetected || 0;
+        const totalProcessed = pusherData?.total_processed || 0;
+
+        const blockData = {
+          area: areaCode,
+          processed: totalProcessed,        // From pusher (real-time worker progress)
+          total: totalUploaded,             // From UploadDetails (user uploaded count)
+          detectedCount: detectedCount,     // From pusher (real-time detected count)
+          undetectedCount: undetectedCount, // From pusher (real-time undetected count)
+        };
+
+        console.log(`[Monitoring] Block ${areaCode}: ${totalProcessed}/${totalUploaded} (${detectedCount} detected, ${undetectedCount} undetected) [Pusher: ${pusherData ? 'YES' : 'NO'}]`);
+
+        // Categorize as complete or in progress
+        if (totalUploaded > 0) {
+          if (totalProcessed >= totalUploaded) {
+            complete.push(blockData);
+          } else {
+            inProgress.push(blockData);
+          }
+        }
+      });
+
+      // Sort by area code
+      inProgress.sort((a, b) => a.area.localeCompare(b.area));
+      complete.sort((a, b) => a.area.localeCompare(b.area));
+
+      setBlockProgress({ inProgress, complete });
+      console.log('[Monitoring] Block progress updated:', {
+        inProgressCount: inProgress.length,
+        completeCount: complete.length,
+        inProgress,
+        complete,
+      });
+    } catch (error) {
+      console.error('[Monitoring] Error transforming API data:', error);
+    }
+  }, [pusherProgress]);
+
+  // Fetch monitoring statistics from API (Bird Drop Per Block endpoint + UploadDetails)
+  const fetchStatsFromAPI = useCallback(async () => {
+    try {
+      setLoading(true);
+      console.log('[Monitoring] Fetching monitoring data from API...');
+
+      const today = getTodayDate();
+
+      // Fetch BOTH endpoints in parallel for comparison
+      const [birdDropsResponse, uploadDetailsResponse] = await Promise.all([
+        apiService.getDashboardBDPerBlock('today'),
+        apiService.getUploadDetails(today),
+      ]);
+
+      console.log('[Monitoring] ✅ Bird Drops API response:', birdDropsResponse);
+      console.log('[Monitoring] ✅ Upload Details API response:', uploadDetailsResponse);
+
+      // Calculate metrics from bird_drops_by_block
+      let totalInSystem = 0;
+      let totalDetected = 0;
+
+      const birdDropsData = (birdDropsResponse.success && birdDropsResponse.data) ? birdDropsResponse.data : [];
+      const uploadDetailsData = (uploadDetailsResponse.success && uploadDetailsResponse.data) ? uploadDetailsResponse.data : [];
+
+      birdDropsData.forEach((block) => {
+        totalInSystem += block.total || 0;
+        totalDetected += (block.true_detection || 0) + (block.false_detection || 0);
+      });
+
+      // Calculate metrics from UploadDetails
+      let totalUploaded = 0;
+      let sessionCount = uploadDetailsData.length;
+
+      uploadDetailsData.forEach((session) => {
+        totalUploaded += session.start_uploads || 0;
+      });
+
+      // Transform API data to block progress format (PASS BOTH DATASETS)
+      transformAPIDataToBlockProgress(birdDropsData, uploadDetailsData);
+
+      // Calculate completion rate
+      const completionRate = totalUploaded > 0
+        ? Math.round((totalDetected / totalUploaded) * 100)
+        : 0;
+
+      // Update comparison metrics
+      setComparisonMetrics({
+        totalUploaded,
+        totalInSystem,
+        totalDetected,
+        completionRate,
+        sessionCount,
+      });
+
+      console.log('[Monitoring] 📊 Comparison Metrics:', {
+        totalUploaded,
+        totalInSystem,
+        totalDetected,
+        completionRate: `${completionRate}%`,
+        sessionCount,
+      });
+
+      setLastUpdateTime(new Date());
+    } catch (error) {
+      console.error('[Monitoring] Error fetching stats from API:', error);
+
+      // Don't show alert on background refresh errors
+      if (refreshing) {
+        Alert.alert('Error', 'Failed to fetch monitoring data. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [refreshing, getTodayDate, transformAPIDataToBlockProgress]);
 
   // Start polling (every 5 minutes)
   const startPolling = useCallback(() => {
@@ -145,103 +305,28 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
     }
   }, []);
 
-  // Fetch monitoring statistics from API (Bird Drop Per Block endpoint)
-  const fetchStatsFromAPI = useCallback(async () => {
-    try {
-      setLoading(true);
-      console.log('[Monitoring] Fetching block progress from API...');
-
-      // Fetch data from getDashboardBDPerBlock API
-      const response = await apiService.getDashboardBDPerBlock('today');
-
-      if (response.success && response.data) {
-        console.log('[Monitoring] ✅ API data received:', response.data);
-
-        // Transform API data to block progress format
-        transformAPIDataToBlockProgress(response.data);
-        setLastUpdateTime(new Date());
-      } else {
-        console.warn('[Monitoring] ⚠️ API returned no data or failed:', response);
-
-        // Check if error is due to Pusher quota exceeded
-        if (response.message && (
-          response.message.includes('Rate limit exceeded') ||
-          response.message.includes('Message quota exceeded')
-        )) {
-          console.log('[Monitoring] Pusher quota exceeded - switching to polling mode');
-          setDataSource('polling');
-          disconnectPusher();
-        }
-      }
-    } catch (error) {
-      console.error('[Monitoring] Error fetching stats from API:', error);
-
-      // Don't show alert on background refresh errors
-      if (refreshing) {
-        Alert.alert('Error', 'Failed to fetch monitoring data. Please try again.');
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [refreshing, disconnectPusher, transformAPIDataToBlockProgress]);
-
-  // Transform API data (Bird Drop Per Block) to block progress format
-  const transformAPIDataToBlockProgress = useCallback((apiData) => {
-    try {
-      const inProgress = [];
-      const complete = [];
-
-      // apiData format: [{ area_code: 'A', total: 100, true_detection: 80, false_detection: 20 }]
-      apiData.forEach((block) => {
-        const blockData = {
-          area: block.area_code,
-          processed: block.true_detection + block.false_detection, // Total processed
-          total: block.total, // Total cases
-        };
-
-        // Categorize as complete or in progress
-        if (blockData.processed >= blockData.total && blockData.total > 0) {
-          complete.push(blockData);
-        } else if (blockData.total > 0) {
-          inProgress.push(blockData);
-        }
-      });
-
-      // Sort by area code
-      inProgress.sort((a, b) => a.area.localeCompare(b.area));
-      complete.sort((a, b) => a.area.localeCompare(b.area));
-
-      setBlockProgress({ inProgress, complete });
-      console.log('[Monitoring] Block progress updated:', {
-        inProgressCount: inProgress.length,
-        completeCount: complete.length
-      });
-    } catch (error) {
-      console.error('[Monitoring] Error transforming API data:', error);
-    }
-  }, []);
-
-  // Initial load and setup hybrid system (Pusher + Polling fallback)
+  // Initial load and setup polling-only system (NO WebSocket/Pusher)
   useEffect(() => {
-    console.log('[Monitoring] Initializing hybrid monitoring system...');
+    console.log('[Monitoring] Initializing polling-based monitoring system...');
 
     // Initial data fetch
     fetchStatsFromAPI();
 
-    // Try to connect to Pusher for real-time updates
-    initializePusher();
+    // DISABLED: WebSocket/Pusher connection (not needed for production)
+    // Only use API polling every 5 minutes
+    // initializePusher(); // ❌ DISABLED - WebSocket not available
 
-    // Setup polling as fallback (every 5 minutes)
+    // Setup polling as primary mechanism (every 5 minutes)
     startPolling();
 
     // Cleanup on unmount
     return () => {
       console.log('[Monitoring] Cleaning up monitoring system...');
       stopPolling();
-      disconnectPusher();
+      // disconnectPusher(); // ❌ DISABLED - No Pusher connection
     };
-  }, [fetchStatsFromAPI, initializePusher, startPolling, stopPolling, disconnectPusher]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
 
   // Pull to refresh handler
   const onRefresh = useCallback(() => {
@@ -260,12 +345,10 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
     return `${hours}h ago`;
   };
 
-  // Calculate total stats
-  const totalUploaded = blockProgress.inProgress.reduce((sum, b) => sum + b.total, 0) +
-                       blockProgress.complete.reduce((sum, b) => sum + b.total, 0);
-  const totalProcessed = blockProgress.inProgress.reduce((sum, b) => sum + b.processed, 0) +
-                        blockProgress.complete.reduce((sum, b) => sum + b.processed, 0);
-  const progress = totalUploaded > 0 ? Math.round((totalProcessed / totalUploaded) * 100) : 0;
+  // Calculate total stats from block progress (for display)
+  const totalUploaded = comparisonMetrics.totalUploaded || 0;
+  const totalProcessed = comparisonMetrics.totalDetected || 0;
+  const progress = comparisonMetrics.completionRate || 0;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -457,9 +540,7 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
               <View>
                 <Text style={styles.lastUpdateText}>Last Update: {getTimeAgo()}</Text>
                 <Text style={styles.dataSourceText}>
-                  {dataSource === 'pusher' && '📡 Real-time (Pusher)'}
-                  {dataSource === 'polling' && '🔄 Polling (5 min)'}
-                  {dataSource === 'initializing' && '⏳ Initializing...'}
+                  📊 Hybrid: Pusher (real-time progress) + API (total uploaded)
                 </Text>
               </View>
               <TouchableOpacity onPress={fetchStatsFromAPI} style={styles.refreshButton}>
@@ -535,6 +616,42 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
           </LinearGradient>
         </BlurView>
 
+        {/* Detailed Comparison Metrics */}
+        {comparisonMetrics.sessionCount > 0 && (
+          <BlurView intensity={90} tint="light" style={styles.metricsDetailBlur}>
+            <LinearGradient
+              colors={['rgba(30,144,255,0.05)', 'rgba(0,191,255,0.03)']}
+              style={styles.metricsDetailGradient}
+            >
+              <Text style={styles.metricsDetailTitle}>📊 Detailed Metrics</Text>
+              <View style={styles.metricsDetailRow}>
+                <View style={styles.metricsDetailItem}>
+                  <Text style={styles.metricsDetailLabel}>Upload Sessions</Text>
+                  <Text style={styles.metricsDetailValue}>{comparisonMetrics.sessionCount}</Text>
+                </View>
+                <View style={styles.metricsDetailDivider} />
+                <View style={styles.metricsDetailItem}>
+                  <Text style={styles.metricsDetailLabel}>Total Uploaded</Text>
+                  <Text style={styles.metricsDetailValue}>{comparisonMetrics.totalUploaded}</Text>
+                </View>
+                <View style={styles.metricsDetailDivider} />
+                <View style={styles.metricsDetailItem}>
+                  <Text style={styles.metricsDetailLabel}>In System</Text>
+                  <Text style={styles.metricsDetailValue}>{comparisonMetrics.totalInSystem}</Text>
+                </View>
+                <View style={styles.metricsDetailDivider} />
+                <View style={styles.metricsDetailItem}>
+                  <Text style={styles.metricsDetailLabel}>Detected</Text>
+                  <Text style={styles.metricsDetailValue}>{comparisonMetrics.totalDetected}</Text>
+                </View>
+              </View>
+              <Text style={styles.metricsDetailFootnote}>
+                Data synced from UploadDetails & Bird Drops by Block APIs
+              </Text>
+            </LinearGradient>
+          </BlurView>
+        )}
+
         {/* 2-Panel Block Progress Display */}
         {totalUploaded > 0 ? (
           <View style={styles.blockProgressContainer}>
@@ -557,26 +674,38 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
                         <Text style={styles.emptyBlockText}>All blocks complete!</Text>
                       </View>
                     ) : (
-                      blockProgress.inProgress.map((block) => (
-                        <View key={block.area} style={[styles.blockItem, { borderColor: '#FFC107' }]}>
-                          <View style={styles.blockItemHeader}>
-                            <Text style={[styles.blockAreaLabel, { color: '#FFC107' }]}>Block {block.area}</Text>
-                            <Text style={[styles.blockProgressText, { color: '#FFC107' }]}>
-                              {block.processed}/{block.total}
-                            </Text>
+                      blockProgress.inProgress.map((block) => {
+                        const progressPercentage = block.total > 0 ? Math.round((block.processed / block.total) * 100) : 0;
+                        return (
+                          <View key={block.area} style={[styles.blockItem, { borderColor: '#FFC107' }]}>
+                            <View style={styles.blockItemHeader}>
+                              <Text style={[styles.blockAreaLabel, { color: '#FFC107' }]}>Block {block.area}</Text>
+                              <Text style={[styles.blockProgressText, { color: '#FFC107' }]}>
+                                {block.processed}/{block.total} ({progressPercentage}%)
+                              </Text>
+                            </View>
+
+                            {/* Detection breakdown */}
+                            <View style={styles.blockDetailRow}>
+                              <Text style={styles.blockDetailText}>
+                                ✅ Detected: <Text style={styles.blockDetailValue}>{block.detectedCount || 0}</Text>
+                              </Text>
+                              <Text style={styles.blockDetailText}>
+                                ⚪ Undetected: <Text style={styles.blockDetailValue}>{block.undetectedCount || 0}</Text>
+                              </Text>
+                            </View>
+
+                            <View style={styles.blockProgressBar}>
+                              <LinearGradient
+                                colors={['#FFC107', '#FF9800']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 0 }}
+                                style={[styles.blockProgressFill, { width: `${progressPercentage}%` }]}
+                              />
+                            </View>
                           </View>
-                          <View style={styles.blockProgressBar}>
-                            <LinearGradient
-                              colors={['#FFC107', '#FF9800']}
-                              start={{ x: 0, y: 0 }}
-                              end={{ x: 1, y: 0 }}
-                              style={[styles.blockProgressFill, {
-                                width: `${block.total > 0 ? (block.processed / block.total) * 100 : 0}%`
-                              }]}
-                            />
-                          </View>
-                        </View>
-                      ))
+                        );
+                      })
                     )}
                   </ScrollView>
                 </LinearGradient>
@@ -607,9 +736,20 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
                           <View style={styles.blockItemHeader}>
                             <Text style={[styles.blockAreaLabel, { color: '#4CAF50' }]}>Block {block.area}</Text>
                             <Text style={[styles.blockProgressText, { color: '#4CAF50' }]}>
-                              {block.processed}/{block.total}
+                              {block.processed}/{block.total} (100%)
                             </Text>
                           </View>
+
+                          {/* Detection breakdown */}
+                          <View style={styles.blockDetailRow}>
+                            <Text style={styles.blockDetailText}>
+                              ✅ Detected: <Text style={styles.blockDetailValue}>{block.detectedCount || 0}</Text>
+                            </Text>
+                            <Text style={styles.blockDetailText}>
+                              ⚪ Undetected: <Text style={styles.blockDetailValue}>{block.undetectedCount || 0}</Text>
+                            </Text>
+                          </View>
+
                           <View style={styles.blockProgressBar}>
                             <LinearGradient
                               colors={['#4CAF50', '#66BB6A']}
@@ -945,6 +1085,56 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
   },
+  metricsDetailBlur: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  metricsDetailGradient: {
+    padding: 16,
+  },
+  metricsDetailTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#0047AB',
+    marginBottom: 12,
+    textAlign: 'center',
+    letterSpacing: 0.5,
+  },
+  metricsDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  metricsDetailItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  metricsDetailLabel: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#00BFFF',
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  metricsDetailValue: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#1E90FF',
+  },
+  metricsDetailDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: 'rgba(30,144,255,0.2)',
+  },
+  metricsDetailFootnote: {
+    fontSize: 8,
+    color: '#0EA5E9',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
   blockProgressContainer: {
     flexDirection: 'row',
     gap: 12,
@@ -1013,6 +1203,39 @@ const styles = StyleSheet.create({
   blockProgressFill: {
     height: '100%',
     borderRadius: 3,
+  },
+  blockDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  blockDetailText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#0047AB',
+  },
+  blockDetailValue: {
+    fontWeight: '900',
+    color: '#1E90FF',
+    fontSize: 11,
+  },
+  sessionCountBadge: {
+    backgroundColor: 'rgba(255,193,7,0.1)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginTop: 6,
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,193,7,0.3)',
+  },
+  sessionCountText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FF8F00',
+    textAlign: 'center',
   },
   emptyBlockState: {
     flex: 1,

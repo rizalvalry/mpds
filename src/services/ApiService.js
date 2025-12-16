@@ -364,12 +364,33 @@ export class ApiService {
     });
   }
 
+  async bulkUpdateCases(workerId, areaCodes, statusId) {
+    const url = this.buildUrl(this.endpoints.bulkUpdate);
+    const areaCodeString = Array.isArray(areaCodes) ? areaCodes.join(',') : areaCodes;
+
+    console.log('[API] bulkUpdateCases - Sending:', { assignTo: workerId, areaCode: areaCodeString, statusId });
+
+    return this.fetchData({
+      method: 'POST',
+      url,
+      body: {
+        assignTo: workerId,
+        areaCode: areaCodeString,
+        statusId: statusId
+      },
+    });
+  }
+
   async generateReport(areaCode = null) {
+    // Match Flutter implementation - only send areaCode if provided
+    // Backend /cases/case/report endpoint expects ONLY areaCode (optional)
     const body = {};
+
     if (areaCode && areaCode !== '') {
       body.areaCode = areaCode;
     }
 
+    console.log('[API] generateReport - Sending body:', body);
     const url = this.buildUrl(this.endpoints.generateReport);
     return this.fetchData({ method: 'POST', url, body });
   }
@@ -431,9 +452,17 @@ export class ApiService {
   }
 
   // Dashboard APIs - exact match with Flutter main_api.dart
-  async getDashboardData(type) {
+  async getDashboardData(type, startDate = null, endDate = null) {
     await this.init(); // Ensure tokens are loaded
-    const url = this.buildUrl(this.endpoints.dashboardData, { type });
+
+    // For month filter, add startDate and endDate parameters
+    const params = { type };
+    if (type === 'month' && startDate && endDate) {
+      params.startDate = startDate;
+      params.endDate = endDate;
+    }
+
+    const url = this.buildUrl(this.endpoints.dashboardData, params);
     return this.fetchData({ method: 'GET', url });
   }
 

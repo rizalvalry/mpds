@@ -1,167 +1,152 @@
-// WebSocket Service (replaces Pusher)
-// Connects to backend.wss for real-time detection events
+// Pusher Service - Official Pusher library for real-time updates
+// Using pusher-js for React Native
 
-const WEBSOCKET_CONFIG = {
-  // IMPORTANT: URL must match ingress configuration
-  // Development: wss://rnd-dev.bsi.co.id/drone/socket/ws/status
-  // Production: wss://droneark.bsi.co.id/ws/status
-  URL: 'wss://rnd-dev.bsi.co.id/drone/socket/ws/status', // Dev endpoint via ingress
-  RECONNECT_INTERVAL: 5000, // 5 seconds
-  MAX_RECONNECT_ATTEMPTS: 10,
+import Pusher from 'pusher-js/react-native';
+
+const PUSHER_CONFIG = {
+  APP_ID: '2072925',
+  KEY: '56f392033b1ff203c45a',
+  SECRET: '0feed6155e527ae7f97d',
+  CLUSTER: 'ap1',
 };
 
 class PusherService {
   constructor() {
-    this.ws = null;
+    this.pusher = null;
+    this.channel = null;
     this.isConnected = false;
     this.eventCallback = null;
-    this.reconnectAttempts = 0;
-    this.reconnectTimer = null;
   }
 
   /**
-   * Connect to WebSocket and listen to detection events
+   * Connect to Pusher and subscribe to detection channel
    * @param {Function} onFileDetected - Callback when file is detected
    * @returns {boolean} Connection status
    */
   connect(onFileDetected = null) {
     try {
-      if (this.isConnected && this.ws) {
-        console.log('[WebSocket] Already connected');
+      if (this.isConnected && this.pusher) {
+        console.log('[Pusher] Already connected');
         return true;
       }
 
-      console.log('[WebSocket] Connecting to:', WEBSOCKET_CONFIG.URL);
+      console.log('[Pusher] Connecting with config:', {
+        key: PUSHER_CONFIG.KEY,
+        cluster: PUSHER_CONFIG.CLUSTER,
+      });
 
-      // Create WebSocket connection (NO AUTH - public endpoint)
-      this.ws = new WebSocket(WEBSOCKET_CONFIG.URL);
+      // Initialize Pusher client
+      this.pusher = new Pusher(PUSHER_CONFIG.KEY, {
+        cluster: PUSHER_CONFIG.CLUSTER,
+        encrypted: true,
+        enabledTransports: ['ws', 'wss'],
+      });
 
       // Store callback
       this.eventCallback = onFileDetected;
 
-      // Connection opened
-      this.ws.onopen = () => {
-        console.log('[WebSocket] ✅ Connected successfully');
+      // Connection state monitoring
+      this.pusher.connection.bind('connected', () => {
+        console.log('[Pusher] ✅ Connected successfully');
         this.isConnected = true;
-        this.reconnectAttempts = 0;
+      });
 
-        // Clear reconnect timer
-        if (this.reconnectTimer) {
-          clearTimeout(this.reconnectTimer);
-          this.reconnectTimer = null;
-        }
-      };
-
-      // Message received from server
-      this.ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          console.log('[WebSocket] 📥 Message received:', message);
-
-          // Handle detection events
-          if (message.type === 'file-detected' || message.type === 'file-undetected') {
-            this.handleDetectionEvent(message);
-          }
-        } catch (error) {
-          console.error('[WebSocket] Error parsing message:', error);
-        }
-      };
-
-      // Connection closed
-      this.ws.onclose = () => {
-        console.log('[WebSocket] ⚠️ Connection closed');
+      this.pusher.connection.bind('disconnected', () => {
+        console.log('[Pusher] ⚠️ Disconnected');
         this.isConnected = false;
-        this.attemptReconnect();
-      };
+      });
 
-      // Connection error
-      this.ws.onerror = (error) => {
-        console.error('[WebSocket] ❌ Connection error:', error);
+      this.pusher.connection.bind('error', (error) => {
+        console.error('[Pusher] ❌ Connection error:', error);
         this.isConnected = false;
-      };
+      });
+
+      // Subscribe to detection channel
+      // Channel name: detection-events (from Pusher Debug Console)
+      this.channel = this.pusher.subscribe('detection-events');
+
+      // Bind to detection events
+      this.channel.bind('file-detected', (data) => {
+        console.log('[Pusher] 📥 file-detected event:', data);
+        this.handleDetectionEvent('file-detected', data);
+      });
+
+      this.channel.bind('file-undetected', (data) => {
+        console.log('[Pusher] 📥 file-undetected event:', data);
+        this.handleDetectionEvent('file-undetected', data);
+      });
+
+      this.channel.bind('file-queued', (data) => {
+        console.log('[Pusher] 📥 file-queued event:', data);
+        this.handleDetectionEvent('file-queued', data);
+      });
+
+      // Handle subscription success
+      this.channel.bind('pusher:subscription_succeeded', () => {
+        console.log('[Pusher] ✅ Subscribed to detection-events channel');
+      });
+
+      // Handle subscription error
+      this.channel.bind('pusher:subscription_error', (error) => {
+        console.error('[Pusher] ❌ Subscription error:', error);
+      });
 
       return true;
     } catch (error) {
-      console.error('[WebSocket] Failed to connect:', error);
+      console.error('[Pusher] Failed to connect:', error);
       this.isConnected = false;
       return false;
     }
   }
 
   /**
-   * Handle detection event from WebSocket
-   * @param {Object} message - Detection message
+   * Handle detection event from Pusher
+   * @param {string} eventType - Event type (file-detected / file-undetected)
+   * @param {Object} data - Event data
    */
-  handleDetectionEvent(message) {
+  handleDetectionEvent(eventType, data) {
     try {
-      const { metadata } = message;
-
-      if (!metadata) {
-        console.warn('[WebSocket] No metadata in message');
-        return;
-      }
-
-      const { area_code } = metadata;
-
-      console.log('[WebSocket] Detection event:', {
-        type: message.type,
-        area_code,
-        confidence: metadata.confidence,
+      console.log('[Pusher] Detection event:', {
+        type: eventType,
+        data,
       });
 
       // Call user callback if provided
       if (this.eventCallback && typeof this.eventCallback === 'function') {
         this.eventCallback({
-          area_code,
-          ...metadata,
-          event_type: message.type,
+          ...data,
+          event_type: eventType,
         });
       }
     } catch (error) {
-      console.error('[WebSocket] Error handling detection event:', error);
+      console.error('[Pusher] Error handling detection event:', error);
     }
   }
 
   /**
-   * Attempt to reconnect to WebSocket
-   */
-  attemptReconnect() {
-    if (this.reconnectAttempts >= WEBSOCKET_CONFIG.MAX_RECONNECT_ATTEMPTS) {
-      console.error('[WebSocket] Max reconnect attempts reached');
-      return;
-    }
-
-    this.reconnectAttempts++;
-    console.log(`[WebSocket] Reconnecting... (attempt ${this.reconnectAttempts}/${WEBSOCKET_CONFIG.MAX_RECONNECT_ATTEMPTS})`);
-
-    this.reconnectTimer = setTimeout(() => {
-      this.connect(this.eventCallback);
-    }, WEBSOCKET_CONFIG.RECONNECT_INTERVAL);
-  }
-
-  /**
-   * Disconnect from WebSocket
+   * Disconnect from Pusher
    */
   disconnect() {
     try {
-      // Clear reconnect timer
-      if (this.reconnectTimer) {
-        clearTimeout(this.reconnectTimer);
-        this.reconnectTimer = null;
+      // Unsubscribe from channel
+      if (this.channel) {
+        this.channel.unbind_all();
+        this.pusher.unsubscribe('detection-events');
+        this.channel = null;
+        console.log('[Pusher] Unsubscribed from channel');
       }
 
-      // Close WebSocket connection
-      if (this.ws) {
-        this.ws.close();
-        this.ws = null;
-        console.log('[WebSocket] Disconnected');
+      // Disconnect Pusher
+      if (this.pusher) {
+        this.pusher.disconnect();
+        this.pusher = null;
+        console.log('[Pusher] Disconnected');
       }
 
       this.isConnected = false;
       this.eventCallback = null;
-      this.reconnectAttempts = 0;
     } catch (error) {
-      console.error('[WebSocket] Error disconnecting:', error);
+      console.error('[Pusher] Error disconnecting:', error);
     }
   }
 
@@ -170,7 +155,7 @@ class PusherService {
    * @returns {boolean} Connection status
    */
   getConnectionStatus() {
-    return this.isConnected && this.ws && this.ws.readyState === WebSocket.OPEN;
+    return this.isConnected && this.pusher && this.pusher.connection.state === 'connected';
   }
 
   /**
@@ -178,7 +163,7 @@ class PusherService {
    * @param {string} areaCode - Area code to test
    */
   simulateFileDetected(areaCode) {
-    console.log('[WebSocket] 🧪 Simulating file-detected event for area:', areaCode);
+    console.log('[Pusher] 🧪 Simulating file-detected event for area:', areaCode);
     try {
       if (this.eventCallback) {
         this.eventCallback({
@@ -192,7 +177,7 @@ class PusherService {
         });
       }
     } catch (error) {
-      console.error('[WebSocket] Error simulating event:', error);
+      console.error('[Pusher] Error simulating event:', error);
     }
   }
 }

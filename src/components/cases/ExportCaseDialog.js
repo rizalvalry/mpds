@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,8 +12,6 @@ import {
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Picker } from '@react-native-picker/picker';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 
 export default function ExportCaseDialog({
   visible,
@@ -24,72 +22,93 @@ export default function ExportCaseDialog({
 }) {
   const [selectedArea, setSelectedArea] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isDownloading, setIsDownloading] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [reportUrl, setReportUrl] = useState(null);
-  const [downloadedFilePath, setDownloadedFilePath] = useState(null);
+  const [encodeBase64, setEncodeBase64] = useState(null); // For send email
+  const [reportGenerated, setReportGenerated] = useState(false);
+
+  // Prepare areas with "All Area" option
+  const areasWithAll = [
+    { area_code: '', name: 'All Area' },
+    ...areas,
+  ];
+
+  // Initialize selectedArea with first area (All Area) when dialog opens
+  useEffect(() => {
+    if (visible && areasWithAll.length > 0 && !selectedArea) {
+      console.log('[ExportCaseDialog] Initializing with first area:', areasWithAll[0]);
+      setSelectedArea(areasWithAll[0]);
+    }
+  }, [visible, areas]);
 
   const handleClose = () => {
     setSelectedArea(null);
-    setReportUrl(null);
-    setDownloadedFilePath(null);
+    setEncodeBase64(null);
+    setReportGenerated(false);
     setIsGenerating(false);
-    setIsDownloading(false);
     setIsSending(false);
     onClose();
   };
 
   const handleDownload = async () => {
+    console.log('[ExportCaseDialog] handleDownload called, selectedArea:', selectedArea);
+
     if (!selectedArea) {
+      console.error('[ExportCaseDialog] No area selected!');
       Alert.alert('Error', 'Please select an area first');
       return;
     }
 
+    if (isGenerating) {
+      return;
+    }
+
     setIsGenerating(true);
+
     try {
+      console.log('[ExportCaseDialog] Generating report for area_code:', selectedArea.area_code);
+
       // Generate report
-      const response = await onGenerateReport(selectedArea.code);
+      const response = await onGenerateReport(selectedArea.area_code);
+      console.log('[ExportCaseDialog] Generate report response:', response);
 
       if (response && response.reportUrl) {
-        setReportUrl(response.reportUrl);
+        setEncodeBase64(response.encodeBase64); // Save for email
+        setReportGenerated(true);
+        console.log('[ExportCaseDialog] Report URL:', response.reportUrl);
+        console.log('[ExportCaseDialog] Encode Base64:', response.encodeBase64);
 
-        // Download PDF
-        setIsDownloading(true);
-        const fileName = `case_report_${selectedArea.code}_${Date.now()}.pdf`;
-        const fileUri = FileSystem.documentDirectory + fileName;
-
-        const downloadResult = await FileSystem.downloadAsync(
-          response.reportUrl,
-          fileUri
-        );
-
-        if (downloadResult.status === 200) {
-          setDownloadedFilePath(downloadResult.uri);
-          Alert.alert('Success', 'Report downloaded successfully');
-        } else {
-          throw new Error('Download failed');
-        }
+        // Open PDF in browser
+        await Linking.openURL(response.reportUrl);
+        console.log('[ExportCaseDialog] PDF opened in browser');
       } else {
-        throw new Error('Failed to generate report');
+        throw new Error('Failed to generate report - no reportUrl returned');
       }
     } catch (error) {
-      console.error('[ExportCaseDialog] Error downloading report:', error);
-      Alert.alert('Error', 'Failed to download report');
+      console.error('[ExportCaseDialog] Error generating/opening report:', error);
+      Alert.alert('Error', `Failed to open report: ${error.message}`);
+
+      // Reset states on error
+      setEncodeBase64(null);
+      setReportGenerated(false);
     } finally {
       setIsGenerating(false);
-      setIsDownloading(false);
     }
   };
 
   const handleSendEmail = async () => {
-    if (!reportUrl) {
-      Alert.alert('Error', 'Please download the report first');
+    if (!encodeBase64) {
+      Alert.alert('Error', 'Please generate the report first');
+      return;
+    }
+
+    if (isSending) {
       return;
     }
 
     setIsSending(true);
     try {
-      await onSendEmail(reportUrl);
+      console.log('[ExportCaseDialog] Sending email with base64 data');
+      await onSendEmail(encodeBase64); // Send base64 string, not URL
       Alert.alert('Success', 'Report sent via email successfully');
     } catch (error) {
       console.error('[ExportCaseDialog] Error sending email:', error);
@@ -98,31 +117,6 @@ export default function ExportCaseDialog({
       setIsSending(false);
     }
   };
-
-  const handleOpenFile = async () => {
-    if (!downloadedFilePath) {
-      Alert.alert('Error', 'Please download the report first');
-      return;
-    }
-
-    try {
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(downloadedFilePath);
-      } else {
-        Alert.alert('Info', 'File saved to: ' + downloadedFilePath);
-      }
-    } catch (error) {
-      console.error('[ExportCaseDialog] Error opening file:', error);
-      Alert.alert('Error', 'Failed to open file');
-    }
-  };
-
-  // Prepare areas with "All Area" option
-  const areasWithAll = [
-    { code: '', name: 'All Area' },
-    ...areas,
-  ];
 
   return (
     <Modal
@@ -144,9 +138,11 @@ export default function ExportCaseDialog({
               <Text style={styles.pickerLabel}>Select Area:</Text>
               <View style={styles.pickerWrapper}>
                 <Picker
-                  selectedValue={selectedArea?.code}
+                  selectedValue={selectedArea?.area_code}
                   onValueChange={(itemValue) => {
-                    const area = areasWithAll.find((a) => a.code === itemValue);
+                    console.log('[ExportCaseDialog] Picker onValueChange, itemValue:', itemValue);
+                    const area = areasWithAll.find((a) => a.area_code === itemValue);
+                    console.log('[ExportCaseDialog] Found area:', area);
                     setSelectedArea(area);
                   }}
                   style={styles.picker}
@@ -154,9 +150,9 @@ export default function ExportCaseDialog({
                 >
                   {areasWithAll.map((area) => (
                     <Picker.Item
-                      key={area.code || 'all'}
+                      key={area.area_code || area.id || 'all'}
                       label={area.name}
-                      value={area.code}
+                      value={area.area_code}
                     />
                   ))}
                 </Picker>
@@ -165,21 +161,21 @@ export default function ExportCaseDialog({
 
             {/* Action Buttons */}
             <View style={styles.actionContainer}>
-              {/* Download Button */}
+              {/* Download Button - Opens PDF in browser */}
               <TouchableOpacity
                 style={[
                   styles.actionButton,
                   styles.downloadButton,
-                  (isGenerating || isDownloading) && styles.disabledButton,
+                  isGenerating && styles.disabledButton,
                 ]}
                 onPress={handleDownload}
-                disabled={isGenerating || isDownloading}
+                disabled={isGenerating}
               >
-                {isGenerating || isDownloading ? (
+                {isGenerating ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <>
-                    <Text style={styles.actionIcon}>⬇</Text>
+                    <Text style={styles.actionIcon}>📄</Text>
                     <Text style={styles.actionButtonText}>Download</Text>
                   </>
                 )}
@@ -190,10 +186,10 @@ export default function ExportCaseDialog({
                 style={[
                   styles.actionButton,
                   styles.emailButton,
-                  (!reportUrl || isSending) && styles.disabledButton,
+                  (!reportGenerated || isSending) && styles.disabledButton,
                 ]}
                 onPress={handleSendEmail}
-                disabled={!reportUrl || isSending}
+                disabled={!reportGenerated || isSending}
               >
                 {isSending ? (
                   <ActivityIndicator size="small" color="#fff" />
@@ -204,27 +200,13 @@ export default function ExportCaseDialog({
                   </>
                 )}
               </TouchableOpacity>
-
-              {/* Open File Button */}
-              <TouchableOpacity
-                style={[
-                  styles.actionButton,
-                  styles.openButton,
-                  !downloadedFilePath && styles.disabledButton,
-                ]}
-                onPress={handleOpenFile}
-                disabled={!downloadedFilePath}
-              >
-                <Text style={styles.actionIcon}>📄</Text>
-                <Text style={styles.actionButtonText}>Open</Text>
-              </TouchableOpacity>
             </View>
 
             {/* Status Indicator */}
-            {downloadedFilePath && (
+            {reportGenerated && (
               <View style={styles.statusContainer}>
                 <Text style={styles.statusIcon}>✓</Text>
-                <Text style={styles.statusText}>Report downloaded</Text>
+                <Text style={styles.statusText}>Report generated successfully</Text>
               </View>
             )}
 

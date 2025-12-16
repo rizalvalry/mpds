@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Dimensions, Alert, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as DocumentPicker from 'expo-document-picker';
 import { useUpload } from '../contexts/UploadContext';
 import DynamicHeader from '../components/shared/DynamicHeader';
 import { useTheme } from '../contexts/ThemeContext';
+import apiService from '../services/ApiService';
 
 const { width } = Dimensions.get('window');
 
@@ -29,6 +30,30 @@ export default function UploadMockup({
   } = useUpload();
   const [selectedImages, setSelectedImages] = useState([]);
   const { theme, isDarkMode } = useTheme();
+
+  // MANDATORY: Area selection state (SOP requirement - user must select 1 block area before upload)
+  const [selectedAreaBlock, setSelectedAreaBlock] = useState(null);
+  const [showAreaDropdown, setShowAreaDropdown] = useState(false);
+  const [areaList, setAreaList] = useState([]); // List of all available areas from API
+
+  // Fetch area list from API on mount
+  useEffect(() => {
+    const fetchAreaList = async () => {
+      try {
+        const response = await apiService.getAreas();
+        if (response.success && response.data) {
+          setAreaList(response.data);
+          console.log('[UploadMockup] Area list loaded:', response.data.length, 'areas');
+        } else {
+          console.error('[UploadMockup] Failed to load area list:', response.message);
+        }
+      } catch (error) {
+        console.error('[UploadMockup] Error fetching area list:', error);
+      }
+    };
+
+    fetchAreaList();
+  }, []);
 
   // Determine what to show in preview panel
   const hasUploadHistory = uploadedFiles.length > 0;
@@ -99,12 +124,29 @@ export default function UploadMockup({
       return;
     }
 
+    // VALIDATION: User MUST select area block before upload (SOP requirement)
+    if (!selectedAreaBlock) {
+      Alert.alert(
+        'Area Block Required',
+        'Please select the area block for this upload session.\n\nSOP: Upload must be done per 1 block area at a time.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     try {
-      console.log(`[Upload] Starting upload via context: ${selectedImages.length} images`);
+      console.log(`[Upload] Starting upload via context: ${selectedImages.length} images to area ${selectedAreaBlock}`);
 
       // FIX: Start upload via context - errors will be caught early
-      // Pass session to createUploadDetails for Monitoring screen
-      const result = await startUpload(selectedImages, session);
+      // Pass session with selected area code to createUploadDetails for Monitoring screen
+      const sessionWithArea = {
+        ...session,
+        drone: {
+          ...session?.drone,
+          area_codes: [selectedAreaBlock], // Use selected area block
+        }
+      };
+      const result = await startUpload(selectedImages, sessionWithArea);
 
       // Success
       const successCount = result.summary.success;
@@ -114,12 +156,13 @@ export default function UploadMockup({
       if (errorCount === 0) {
         Alert.alert(
           'Upload Berhasil! ✅',
-          `${successCount} gambar berhasil diupload.\n\nGambar akan segera diproses oleh AI untuk deteksi bird drops.`,
+          `${successCount} gambar berhasil diupload ke Area ${selectedAreaBlock}.\n\nGambar akan segera diproses oleh AI untuk deteksi bird drops.`,
           [
             {
               text: 'OK',
               onPress: () => {
                 setSelectedImages([]);
+                setSelectedAreaBlock(null); // Reset area selection for next upload
               }
             }
           ]
@@ -366,7 +409,7 @@ export default function UploadMockup({
               </View>
 
               <Text style={{ fontSize: 24, fontWeight: '700', color: '#1F2937', marginBottom: 8 }}>
-                Browse File
+                Browse File test
               </Text>
             </TouchableOpacity>
 
@@ -666,6 +709,132 @@ export default function UploadMockup({
             </ScrollView>
           </View>
         </View>
+
+        {/* MANDATORY: Area Block Selection Dropdown (SOP requirement) */}
+        {selectedImages.length > 0 && (
+          <View style={{
+            backgroundColor: '#FFFBEB',
+            borderRadius: 12,
+            padding: 20,
+            marginTop: 24,
+            borderWidth: 2,
+            borderColor: '#F59E0B',
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={{ fontSize: 20 }}>📍</Text>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: '#92400E', marginLeft: 8 }}>
+                SELECT AREA BLOCK
+              </Text>
+              <View style={{
+                backgroundColor: '#DC2626',
+                paddingHorizontal: 8,
+                paddingVertical: 2,
+                borderRadius: 4,
+                marginLeft: 8,
+              }}>
+                <Text style={{ fontSize: 10, fontWeight: '700', color: '#FFFFFF' }}>REQUIRED</Text>
+              </View>
+            </View>
+
+            <Text style={{ fontSize: 14, color: '#78350F', marginBottom: 12 }}>
+              Choose 1 block area for this upload session
+            </Text>
+
+            {/* Dropdown Button */}
+            <TouchableOpacity
+              style={{
+                backgroundColor: '#FFFFFF',
+                borderWidth: 2,
+                borderColor: showAreaDropdown ? '#F59E0B' : '#D1D5DB',
+                borderRadius: 8,
+                paddingVertical: 14,
+                paddingHorizontal: 16,
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+              onPress={() => setShowAreaDropdown(!showAreaDropdown)}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 16, color: selectedAreaBlock ? '#1F2937' : '#9CA3AF', fontWeight: '600' }}>
+                {selectedAreaBlock ? `Block ${selectedAreaBlock}` : 'Select Block Area...'}
+              </Text>
+              <Text style={{ fontSize: 16, color: '#6B7280' }}>
+                {showAreaDropdown ? '▲' : '▼'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Dropdown Options */}
+            {showAreaDropdown && (
+              <View style={{
+                backgroundColor: '#FFFFFF',
+                borderRadius: 8,
+                marginTop: 8,
+                borderWidth: 1,
+                borderColor: '#E5E7EB',
+                maxHeight: 200,
+              }}>
+                <ScrollView>
+                  {areaList.map((area) => (
+                    <TouchableOpacity
+                      key={area.id}
+                      style={{
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        backgroundColor: selectedAreaBlock === area.area_code ? '#FEF3C7' : '#FFFFFF',
+                        borderBottomWidth: 1,
+                        borderBottomColor: '#F3F4F6',
+                      }}
+                      onPress={() => {
+                        setSelectedAreaBlock(area.area_code);
+                        setShowAreaDropdown(false);
+                        console.log(`[UploadMockup] Area block selected: ${area.area_code} (${area.name})`);
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={{
+                        fontSize: 15,
+                        color: selectedAreaBlock === area.area_code ? '#92400E' : '#374151',
+                        fontWeight: selectedAreaBlock === area.area_code ? '700' : '500',
+                      }}>
+                        Block {area.area_code} - {area.name}
+                      </Text>
+                      {selectedAreaBlock === area.area_code && (
+                        <Text style={{ fontSize: 18, color: '#F59E0B' }}>✓</Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                  {areaList.length === 0 && (
+                    <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                      <ActivityIndicator size="small" color="#F59E0B" />
+                      <Text style={{ fontSize: 14, color: '#9CA3AF', marginTop: 8 }}>
+                        Loading area blocks...
+                      </Text>
+                    </View>
+                  )}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* Selected Area Display */}
+            {selectedAreaBlock && (
+              <View style={{
+                backgroundColor: '#D1FAE5',
+                borderRadius: 8,
+                paddingVertical: 10,
+                paddingHorizontal: 16,
+                marginTop: 12,
+              }}>
+                <Text style={{ fontSize: 14, color: '#065F46', fontWeight: '600' }}>
+                  ✓ Uploading to Block <Text style={{ fontWeight: '700' }}>{selectedAreaBlock}</Text>
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Upload Button (Below Both Panels) */}
         {selectedImages.length > 0 && !isUploading && (

@@ -18,7 +18,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../contexts/ThemeContext';
 import AppLayout from '../layouts/AppLayout';
 import apiService from '../services/ApiService';
-import CasesScreen from './CasesScreen';
 import MonitoringScreen from './MonitoringScreen';
 import UploadMockup from './UploadMockup';
 import MonitoringMockup from './MonitoringMockup';

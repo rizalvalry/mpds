@@ -1,12 +1,25 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { TouchableOpacity, Text, StyleSheet, View } from 'react-native';
 
-export default function ValidationButton({ statusName, onPress, hasWorker }) {
+function ValidationButton({ statusName, onPress, hasWorker }) {
   // Show button if status is not completed/confirmed/false detection
-  const statusLower = statusName?.toLowerCase() || '';
-  const isValidationNeeded = !statusLower.includes('confirmed') &&
-                             !statusLower.includes('completed') &&
-                             !statusLower.includes('false detection');
+  const isValidationNeeded = useMemo(() => {
+    const statusLower = statusName?.toLowerCase() || '';
+    return !statusLower.includes('confirmed') &&
+           !statusLower.includes('completed') &&
+           !statusLower.includes('false detection');
+  }, [statusName]);
+
+  const handlePress = useMemo(() => {
+    return () => {
+      if (!hasWorker) {
+        // This will be handled by parent component
+        onPress(false);
+      } else {
+        onPress(true);
+      }
+    };
+  }, [hasWorker, onPress]);
 
   if (!isValidationNeeded) {
     return (
@@ -15,15 +28,6 @@ export default function ValidationButton({ statusName, onPress, hasWorker }) {
       </View>
     );
   }
-
-  const handlePress = () => {
-    if (!hasWorker) {
-      // This will be handled by parent component
-      onPress(false);
-    } else {
-      onPress(true);
-    }
-  };
 
   return (
     <TouchableOpacity
@@ -69,3 +73,6 @@ const styles = StyleSheet.create({
     color: '#999',
   },
 });
+
+// Export default without memo to ensure proper re-renders when props change
+export default ValidationButton;

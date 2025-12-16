@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider } from './src/contexts/ThemeContext';
 import { UploadProvider } from './src/contexts/UploadContext';
@@ -170,6 +171,24 @@ function MainApp() {
 export default function App() {
   const [isReady, setIsReady] = useState(false);
   const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
+
+  // Set screen orientation on app start
+  useEffect(() => {
+    async function setOrientation() {
+      try {
+        // Allow all orientations EXCEPT portrait upside down
+        // This allows: Portrait, Landscape Left, Landscape Right
+        await ScreenOrientation.lockAsync(
+          ScreenOrientation.OrientationLock.ALL_BUT_UPSIDE_DOWN
+        );
+        console.log('[App] Screen orientation set to: ALL_BUT_UPSIDE_DOWN');
+      } catch (e) {
+        console.warn('[App] Error setting screen orientation:', e);
+      }
+    }
+
+    setOrientation();
+  }, []);
 
   useEffect(() => {
     async function prepare() {

@@ -5,10 +5,12 @@ import apiService from '../services/ApiService';
 import DynamicHeader from '../components/shared/DynamicHeader';
 import { useTheme } from '../contexts/ThemeContext';
 import BulkAssignDialog from '../components/cases/BulkAssignDialog';
+import BulkValidateDialog from '../components/cases/BulkValidateDialog';
 import AssigneeDropdown from '../components/cases/AssigneeDropdown';
 import ValidationButton from '../components/cases/ValidationButton';
 import ValidationOptionsDialog from '../components/cases/ValidationOptionsDialog';
 import ExportCaseDialog from '../components/cases/ExportCaseDialog';
+import SuccessNotification from '../components/shared/SuccessNotification';
 
 const { width } = Dimensions.get('window');
 
@@ -52,7 +54,7 @@ class CasesErrorBoundary extends React.Component {
 }
 
 function CasesMockupContent({ session, setActiveMenu, setSession, embedded = false, onNavigate }) {
-  console.log('[CasesMockup] ✅ LOADED WITH NEW FEATURES: Bulk Assign, Assignee Dropdown, Validation Button, Export Dialog, Advanced Filters');
+  console.log('[CasesMockup] ✅ LOADED WITH NEW FEATURES: Bulk Assign, Bulk Validate, Assignee Dropdown, Validation Button, Export Dialog, Advanced Filters');
   const [selectedArea, setSelectedArea] = useState(null);
   const [casesData, setCasesData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -72,6 +74,7 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
   const [areas, setAreas] = useState([]);
   const [selectedCase, setSelectedCase] = useState(null);
   const [showBulkAssignDialog, setShowBulkAssignDialog] = useState(false);
+  const [showBulkValidateDialog, setShowBulkValidateDialog] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showValidationDialog, setShowValidationDialog] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -79,6 +82,10 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
   // Advanced filter states
   const [filterIsConfirmed, setFilterIsConfirmed] = useState(null); // null = all, true = confirmed, false = not confirmed
   const [filterStatus, setFilterStatus] = useState(null); // null = all, 1 = Not Started, etc.
+
+  // Success notification
+  const [showSuccessNotification, setShowSuccessNotification] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
   const { theme, isDarkMode } = useTheme();
   const handleForceLogout = async () => {
@@ -320,6 +327,53 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
     }
   };
 
+  const handleBulkAreaConfirm = async (workerId, areaCodes, statusId) => {
+    try {
+      console.log('[CasesMockup] Bulk Area Confirm:', { workerId, areaCodes, statusId });
+      const response = await apiService.bulkUpdateCases(workerId, areaCodes, statusId);
+
+      if (response.success) {
+        const updatedCount = response.updated_count || 0;
+        const statusLabel = statusId === 4 ? 'Confirmed (True)' : 'False Detection';
+
+        Alert.alert(
+          'Success',
+          `Successfully updated ${updatedCount} case(s) to ${statusLabel}\n\n${response.message || ''}`
+        );
+        setShowBulkAssignDialog(false);
+        loadCases(); // Refresh data
+      } else {
+        throw new Error(response.message || 'Failed to update cases');
+      }
+    } catch (error) {
+      console.error('[CasesMockup] Error bulk area confirm:', error);
+      Alert.alert('Error', error.message || 'Failed to bulk confirm area cases');
+    }
+  };
+
+  const handleBulkValidate = async (workerId, areaCodes, statusId) => {
+    try {
+      console.log('[CasesMockup] Bulk Validate:', { workerId, areaCodes, statusId });
+      const response = await apiService.bulkUpdateCases(workerId, areaCodes, statusId);
+
+      if (response.success) {
+        const updatedCount = response.updated_count || 0;
+
+        Alert.alert(
+          'Success',
+          `Successfully validated ${updatedCount} case(s)\n\nStatus set to: Progress (ID: 2)\n\n${response.message || ''}`
+        );
+        setShowBulkValidateDialog(false);
+        loadCases(); // Refresh data
+      } else {
+        throw new Error(response.message || 'Failed to validate cases');
+      }
+    } catch (error) {
+      console.error('[CasesMockup] Error bulk validate:', error);
+      Alert.alert('Error', error.message || 'Failed to bulk validate cases');
+    }
+  };
+
   const handleAssigneeChange = async (caseItem, worker) => {
     try {
       const response = await apiService.assignWorker(caseItem.id, worker.id);
@@ -374,7 +428,9 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
 
         console.log('[CasesMockup] Real-time update: Case', selectedCase.id, 'status changed to', newStatus.name);
 
-        Alert.alert('Success', 'Case validated successfully');
+        // Show success notification (can be dismissed by clicking anywhere)
+        setSuccessMessage('Case validated successfully');
+        setShowSuccessNotification(true);
         setShowValidationDialog(false);
         setSelectedCase(null);
 
@@ -388,9 +444,15 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
 
   const handleGenerateReport = async (areaCode) => {
     try {
+      console.log('[CasesMockup] Generating report for areaCode:', areaCode);
       const response = await apiService.generateReport(areaCode);
+      console.log('[CasesMockup] Generate report response:', response);
+
       if (response.success) {
-        return { reportUrl: response.reportUrl || response.data?.reportUrl };
+        return {
+          reportUrl: response.report_url,
+          encodeBase64: response.encode_base64
+        };
       }
       throw new Error('Failed to generate report');
     } catch (error) {
@@ -639,12 +701,12 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
                   paddingVertical: 8,
                   paddingHorizontal: 14,
                   borderRadius: 6,
-                  // backgroundColor: '#FFFFFF',
+                  backgroundColor: '#95b6ed',
                   flexDirection: 'row',
                   alignItems: 'center',
                   gap: 6,
                   borderWidth: 1,
-                  borderColor: '#D1D5DB',
+                  borderColor: '#f0f3f5',
                   shadowColor: '#000',
                   shadowOffset: { width: 0, height: 1 },
                   shadowOpacity: 0.05,
@@ -652,7 +714,6 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
                   elevation: 1,
                 }}
               >
-                <Text style={{ fontSize: 14 }}>📍</Text>
                 <Text style={{ fontSize: 13, fontWeight: '500', color: '#374151' }}>
                   {selectedArea && Array.isArray(areas) && areas.length > 0 ? areas.find(a => a.area_code === selectedArea)?.name || 'All Areas' : 'All Areas'}
                 </Text>
@@ -672,7 +733,7 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
                   paddingVertical: 8,
                   paddingHorizontal: 14,
                   borderRadius: 6,
-                  backgroundColor: '#FFFFFF',
+                  backgroundColor: '#67b6db',
                   flexDirection: 'row',
                   alignItems: 'center',
                   gap: 6,
@@ -689,6 +750,37 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
                 <Text style={{ fontSize: 14 }}>👥</Text>
                 <Text style={{ fontSize: 13, fontWeight: '500', color: '#374151' }}>
                   Bulk Assign
+                </Text>
+              </TouchableOpacity>
+
+              {/* Bulk Validate Button */}
+              <TouchableOpacity
+                onPress={() => {
+                  if (workers && workers.length > 0) {
+                    setShowBulkValidateDialog(true);
+                  } else {
+                    Alert.alert('Info', 'Workers data not available. Please refresh the page.');
+                  }
+                }}
+                style={{
+                  paddingVertical: 8,
+                  paddingHorizontal: 14,
+                  borderRadius: 6,
+                  backgroundColor: '#00D9FF',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.1,
+                  shadowRadius: 2,
+                  elevation: 2,
+                  opacity: workers && workers.length > 0 ? 1 : 0.5,
+                }}
+              >
+                <Text style={{ fontSize: 14, color: '#FFFFFF' }}>✓</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#FFFFFF' }}>
+                  Bulk Validate
                 </Text>
               </TouchableOpacity>
 
@@ -1079,7 +1171,20 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
           visible={showBulkAssignDialog}
           onClose={() => setShowBulkAssignDialog(false)}
           workers={workers}
+          areas={areas}
           onBulkAssign={handleBulkAssign}
+          onBulkAreaConfirm={handleBulkAreaConfirm}
+        />
+      )}
+
+      {/* Bulk Validate Dialog */}
+      {Array.isArray(workers) && workers.length > 0 && (
+        <BulkValidateDialog
+          visible={showBulkValidateDialog}
+          onClose={() => setShowBulkValidateDialog(false)}
+          workers={workers}
+          areas={areas}
+          onBulkValidate={handleBulkValidate}
         />
       )}
 
@@ -1227,7 +1332,7 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
                   RESET
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity
+              {/* <TouchableOpacity
                 onPress={() => setShowFilterModal(false)}
                 style={{
                   flex: 1,
@@ -1240,98 +1345,219 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
                 <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFFFFF' }}>
                   APPLY
                 </Text>
-              </TouchableOpacity>
+              </TouchableOpacity> */}
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Image Viewer Modal with Swipe & Zoom */}
+      {/* Image Viewer Modal with Swipe & Zoom - Ultra Smooth Transition */}
       <Modal
         visible={imageModalVisible}
-        transparent={true}
+        transparent={false}
         animationType="fade"
         onRequestClose={() => setImageModalVisible(false)}
+        statusBarTranslucent={true}
       >
-        <View style={{ flex: 1, backgroundColor: '#000' }}>
+        <View style={{ flex: 1, backgroundColor: '#000000' }}>
+          {/* Title Indicator - Enhanced Visibility */}
+          <View style={{
+            position: 'absolute',
+            top: 15,
+            left: 15,
+            zIndex: 999,
+            backgroundColor: 'rgba(0,0,0,0.9)',
+            paddingVertical: 6,
+            paddingHorizontal: 10,
+            borderRadius: 8,
+            borderWidth: 2,
+            borderColor: imageViewIndex === 0 ? 'rgba(0,217,255,0.8)' : 'rgba(255,152,0,0.8)',
+            shadowColor: imageViewIndex === 0 ? '#00D9FF' : '#FF9800',
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.8,
+            shadowRadius: 8,
+            elevation: 10,
+          }}>
+            <Text style={{
+              fontSize: 10,
+              fontWeight: '900',
+              color: imageViewIndex === 0 ? '#00D9FF' : '#FF9800',
+              letterSpacing: 0.5,
+              textShadowColor: 'rgba(0,0,0,0.8)',
+              textShadowOffset: { width: 0, height: 1 },
+              textShadowRadius: 2,
+            }}>
+              {imageViewIndex === 0 ? '🏷️ LABELED' : '📷 ORIGINAL'}
+            </Text>
+          </View>
+
           {/* Close Button */}
           <TouchableOpacity
             onPress={() => setImageModalVisible(false)}
             style={{
               position: 'absolute',
-              top: 50,
-              right: 20,
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: 'rgba(255,255,255,0.2)',
+              top: 15,
+              right: 15,
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              backgroundColor: 'rgba(239,68,68,0.95)',
               justifyContent: 'center',
               alignItems: 'center',
-              zIndex: 999,
+              zIndex: 1000,
+              borderWidth: 2,
+              borderColor: 'rgba(255,255,255,0.4)',
+              shadowColor: '#EF4444',
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.6,
+              shadowRadius: 8,
+              elevation: 10,
             }}
           >
-            <Text style={{ fontSize: 20, color: '#FFFFFF' }}>✕</Text>
+            <Text style={{ fontSize: 18, color: '#FFFFFF', fontWeight: '900' }}>✕</Text>
           </TouchableOpacity>
 
-          {/* Image Zoom Viewer */}
+          {/* Image Zoom Viewer - Optimized for Smooth Swipe */}
           {selectedImage && (
             <ImageViewer
               imageUrls={[
-                { url: selectedImage.case_photo || selectedImage.thumbnail, props: { source: { uri: selectedImage.case_photo || selectedImage.thumbnail } } },
-                { url: selectedImage.origin_photo || selectedImage.thumbnail, props: { source: { uri: selectedImage.origin_photo || selectedImage.thumbnail } } },
+                {
+                  url: selectedImage.case_photo || selectedImage.thumbnail,
+                  props: {
+                    source: { uri: selectedImage.case_photo || selectedImage.thumbnail },
+                    resizeMode: 'contain',
+                  }
+                },
+                {
+                  url: selectedImage.origin_photo || selectedImage.thumbnail,
+                  props: {
+                    source: { uri: selectedImage.origin_photo || selectedImage.thumbnail },
+                    resizeMode: 'contain',
+                  }
+                },
               ]}
               index={imageViewIndex}
-              onChange={(index) => setImageViewIndex(index)}
+              onChange={(index) => {
+                console.log('[ImageViewer] Index changed to:', index);
+                setImageViewIndex(index);
+              }}
               enableSwipeDown={true}
               onSwipeDown={() => setImageModalVisible(false)}
-              backgroundColor="transparent"
+              backgroundColor="#000000"
               saveToLocalByLongPress={false}
               enablePreload={true}
-              renderIndicator={(currentIndex, allSize) => (
-                <View style={{
-                  position: 'absolute',
-                  top: 55,
-                  left: 20,
-                  right: 70,
-                  zIndex: 100,
-                }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#FFFFFF' }}>
-                    {currentIndex === 1 ? 'Detected' : 'Original'}
-                  </Text>
-                  <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 4 }}>
-                    {currentIndex} / {allSize}
-                  </Text>
+              maxOverflow={100}
+              pageAnimateTime={150}
+              flipThreshold={50}
+              useNativeDriver={true}
+              renderIndicator={() => null}
+              loadingRender={() => (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000000' }}>
+                  <ActivityIndicator size="large" color="#00D9FF" />
+                  <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 12, fontWeight: '600' }}>Loading...</Text>
                 </View>
               )}
               renderFooter={() => (
                 <View style={{
                   width: '100%',
-                  paddingBottom: 40,
+                  paddingBottom: 50,
                   alignItems: 'center',
+                  backgroundColor: 'transparent',
                 }}>
-                  {/* Page Indicator Dots */}
+                  {/* Enhanced Page Indicator with Label */}
                   <View style={{
                     flexDirection: 'row',
                     justifyContent: 'center',
                     alignItems: 'center',
-                    gap: 8,
-                    marginBottom: 10,
+                    gap: 12,
+                    marginBottom: 14,
+                    backgroundColor: 'rgba(0,0,0,0.85)',
+                    paddingVertical: 12,
+                    paddingHorizontal: 24,
+                    borderRadius: 28,
+                    borderWidth: 2,
+                    borderColor: imageViewIndex === 0 ? 'rgba(0,217,255,0.5)' : 'rgba(255,152,0,0.5)',
+                    shadowColor: imageViewIndex === 0 ? '#00D9FF' : '#FF9800',
+                    shadowOffset: { width: 0, height: 0 },
+                    shadowOpacity: 0.6,
+                    shadowRadius: 10,
                   }}>
+                    {/* Left Dot - LABELED */}
                     <View style={{
-                      width: imageViewIndex === 0 ? 24 : 8,
-                      height: 8,
-                      borderRadius: 4,
-                      backgroundColor: imageViewIndex === 0 ? '#0EA5E9' : 'rgba(255,255,255,0.4)',
-                    }} />
+                      alignItems: 'center',
+                      gap: 4,
+                    }}>
+                      <View style={{
+                        width: imageViewIndex === 0 ? 36 : 12,
+                        height: 12,
+                        borderRadius: 6,
+                        backgroundColor: imageViewIndex === 0 ? '#00D9FF' : 'rgba(255,255,255,0.25)',
+                        borderWidth: imageViewIndex === 0 ? 2 : 0,
+                        borderColor: '#FFFFFF',
+                        shadowColor: imageViewIndex === 0 ? '#00D9FF' : 'transparent',
+                        shadowOffset: { width: 0, height: 0 },
+                        shadowOpacity: imageViewIndex === 0 ? 0.8 : 0,
+                        shadowRadius: 6,
+                      }} />
+                      {imageViewIndex === 0 && (
+                        <Text style={{
+                          fontSize: 8,
+                          fontWeight: '700',
+                          color: '#00D9FF',
+                          letterSpacing: 0.3,
+                        }}>
+                          LABELED
+                        </Text>
+                      )}
+                    </View>
+
+                    {/* Center Divider */}
                     <View style={{
-                      width: imageViewIndex === 1 ? 24 : 8,
-                      height: 8,
-                      borderRadius: 4,
-                      backgroundColor: imageViewIndex === 1 ? '#0EA5E9' : 'rgba(255,255,255,0.4)',
+                      width: 2,
+                      height: 20,
+                      backgroundColor: 'rgba(255,255,255,0.2)',
                     }} />
+
+                    {/* Right Dot - ORIGINAL */}
+                    <View style={{
+                      alignItems: 'center',
+                      gap: 4,
+                    }}>
+                      <View style={{
+                        width: imageViewIndex === 1 ? 36 : 12,
+                        height: 12,
+                        borderRadius: 6,
+                        backgroundColor: imageViewIndex === 1 ? '#FF9800' : 'rgba(255,255,255,0.25)',
+                        borderWidth: imageViewIndex === 1 ? 2 : 0,
+                        borderColor: '#FFFFFF',
+                        shadowColor: imageViewIndex === 1 ? '#FF9800' : 'transparent',
+                        shadowOffset: { width: 0, height: 0 },
+                        shadowOpacity: imageViewIndex === 1 ? 0.8 : 0,
+                        shadowRadius: 6,
+                      }} />
+                      {imageViewIndex === 1 && (
+                        <Text style={{
+                          fontSize: 8,
+                          fontWeight: '700',
+                          color: '#FF9800',
+                          letterSpacing: 0.3,
+                        }}>
+                          ORIGINAL
+                        </Text>
+                      )}
+                    </View>
                   </View>
-                  <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>
-                    Swipe to switch • Pinch to zoom • Swipe down to close
+
+                  {/* Swipe Instructions */}
+                  <Text style={{
+                    fontSize: 11,
+                    color: 'rgba(255,255,255,0.6)',
+                    fontWeight: '600',
+                    textAlign: 'center',
+                    paddingHorizontal: 20,
+                    letterSpacing: 0.3,
+                  }}>
+                    ← Swipe to switch • Pinch to zoom • Swipe down to close →
                   </Text>
                 </View>
               )}
@@ -1340,11 +1566,20 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
                 bottom: 0,
                 left: 0,
                 right: 0,
+                backgroundColor: 'transparent',
               }}
             />
           )}
         </View>
       </Modal>
+
+      {/* Success Notification - Can be dismissed by clicking anywhere */}
+      <SuccessNotification
+        visible={showSuccessNotification}
+        message={successMessage}
+        onDismiss={() => setShowSuccessNotification(false)}
+        autoHideDuration={3000}
+      />
     </View>
   );
 }

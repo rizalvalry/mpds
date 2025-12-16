@@ -99,12 +99,24 @@ export default function DashboardComplete() {
     try {
       setLoading(true);
 
+      // For month filter, calculate startDate and endDate for current year
+      let startDate = null;
+      let endDate = null;
+
+      if (selectedFilter === 'month') {
+        const now = new Date();
+        const year = now.getFullYear();
+        startDate = `${year}-01-01`;
+        endDate = `${year}-12-31`;
+        console.log('[Dashboard] Month filter - Using date range:', { startDate, endDate });
+      }
+
       // Fetch all dashboard data dari API seperti Flutter
       const [overviewRes, statusRes, workerRes, bdRes, bdPerBlockRes] = await Promise.all([
         apiService.getDashboardOverview(),
         apiService.getDashboardStatus(selectedFilter),
         apiService.getDashboardWorker(selectedFilter),
-        apiService.getDashboardData(selectedFilter),
+        apiService.getDashboardData(selectedFilter, startDate, endDate),
         apiService.getDashboardBDPerBlock(selectedFilter),
       ]);
 
@@ -242,30 +254,50 @@ export default function DashboardComplete() {
   const getBirdDropBarData = () => {
     if (!dashboardBd || dashboardBd.length === 0) {
       return {
-        labels: [],
+        labels: ['No Data'],
         datasets: [{ data: [0] }],
       };
     }
 
-    // Determine number of bars based on filter
-    const totalBars = selectedFilter === 'month' ? 12 : 7;
     const labels = [];
     const data = [];
 
-    // Generate labels
-    if (selectedFilter === 'month') {
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      labels.push(...months);
-    } else {
+    // Generate labels based on filter type
+    if (selectedFilter === 'today') {
+      // Today filter - single bar, ambil value langsung dari data pertama
+      labels.push('Today');
+      const todayData = dashboardBd[0]; // Data hari ini
+      data.push(todayData ? todayData.value : 0);
+
+      console.log('[getBirdDropBarData] Today - Indicator:', todayData?.indicator, 'Value:', todayData?.value);
+    } else if (selectedFilter === 'week') {
+      // Week filter - 7 bars (Mon-Sun), indicator 1-7
       const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       labels.push(...days);
+
+      for (let i = 1; i <= 7; i++) {
+        const dataPoint = dashboardBd.find(item => item.indicator === i);
+        data.push(dataPoint ? dataPoint.value : 0);
+      }
+    } else if (selectedFilter === 'month') {
+      // Month filter - 12 bars (Jan-Dec), indicator 1-12
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      labels.push(...months);
+
+      console.log('[getBirdDropBarData] Month - Raw API data:', JSON.stringify(dashboardBd, null, 2));
+
+      for (let i = 1; i <= 12; i++) {
+        const dataPoint = dashboardBd.find(item => item.indicator === i);
+        const value = dataPoint ? dataPoint.value : 0;
+        data.push(value);
+
+        if (dataPoint) {
+          console.log(`[getBirdDropBarData] Month ${i} (${months[i-1]}): Found indicator ${dataPoint.indicator} with value ${value}`);
+        }
+      }
     }
 
-    // Map data by indicator (1-based index from API)
-    for (let i = 1; i <= totalBars; i++) {
-      const dataPoint = dashboardBd.find(item => item.indicator === i);
-      data.push(dataPoint ? dataPoint.value : 0);
-    }
+    console.log('[getBirdDropBarData] Filter:', selectedFilter, 'Labels:', labels.length, 'Data:', data);
 
     return {
       labels,

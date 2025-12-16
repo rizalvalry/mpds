@@ -8,11 +8,15 @@ import {
   Image,
   Switch,
   ActivityIndicator,
+  Dimensions,
+  ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import apiService from '../../services/ApiService';
 import * as Location from 'expo-location';
 import { useTheme } from '../../contexts/ThemeContext';
+
+const { width } = Dimensions.get('window');
 
 export default function DynamicHeader({
   title,
@@ -394,70 +398,78 @@ export default function DynamicHeader({
         end={{ x: 1, y: 0 }}
         style={styles.header}
       >
-        <View>
-          <Text style={styles.headerTitle}>{title}</Text>
-          <Text style={styles.headerSubtitle}>{subtitle}</Text>
+        {/* Left Section - Title */}
+        <View style={styles.headerLeft}>
+          <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>{subtitle}</Text>
         </View>
 
+        {/* Right Section - Scrollable Badges + Burger Menu */}
         <View style={styles.headerRight}>
-          {/* Area Code Badge */}
-          {session?.area_code && session.area_code.length > 0 && (
-            <View style={styles.areaBadge}>
-              <Text style={styles.areaIcon}>📍</Text>
-              <Text style={styles.areaText}>
-                {session.area_code.join(', ')}
-              </Text>
-            </View>
-          )}
-
-          {/* Location & Time Badge */}
-          <View style={styles.weatherBadge}>
-            {weatherLoading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <View style={styles.locationRow}>
-                <Text style={styles.weatherLocation}>{weatherInfo.location}</Text>
-                <Text style={styles.weatherSeparator}>•</Text>
-                <Text style={styles.weatherTime}>{weatherLabel}</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.badgesContainer}
+          >
+            {/* Area Code Badge */}
+            {session?.area_code && session.area_code.length > 0 && (
+              <View style={styles.areaBadge}>
+                <Text style={styles.areaIcon}>📍</Text>
+                <Text style={styles.areaText}>
+                  {session.area_code.join(', ')}
+                </Text>
               </View>
             )}
-          </View>
 
-          {/* 3-Period Forecast Badge */}
-          {!weatherLoading && weatherForecast.morning && weatherForecast.afternoon && weatherForecast.evening && (
-            <View style={styles.forecastBadge}>
-              <View style={styles.forecastTimeline}>
-                {/* Morning */}
-                <View style={styles.forecastPeriod}>
-                  <Text style={styles.forecastIcon}>{weatherForecast.morning.icon}</Text>
-                  <Text style={styles.forecastLabel}>Pagi</Text>
-                  <Text style={styles.forecastTemp}>{weatherForecast.morning.temperature}°</Text>
+            {/* Location & Time Badge */}
+            <View style={styles.weatherBadge}>
+              {weatherLoading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <View style={styles.locationRow}>
+                  <Text style={styles.weatherLocation}>{weatherInfo.location}</Text>
+                  <Text style={styles.weatherSeparator}>•</Text>
+                  <Text style={styles.weatherTime}>{weatherLabel}</Text>
                 </View>
+              )}
+            </View>
 
-                {/* Connector */}
-                <View style={styles.timelineConnector} />
+            {/* 3-Period Forecast Badge */}
+            {!weatherLoading && weatherForecast.morning && weatherForecast.afternoon && weatherForecast.evening && (
+              <View style={styles.forecastBadge}>
+                <View style={styles.forecastTimeline}>
+                  {/* Morning */}
+                  <View style={styles.forecastPeriod}>
+                    <Text style={styles.forecastIcon}>{weatherForecast.morning.icon}</Text>
+                    <Text style={styles.forecastLabel}>Pagi</Text>
+                    <Text style={styles.forecastTemp}>{weatherForecast.morning.temperature}°</Text>
+                  </View>
 
-                {/* Afternoon */}
-                <View style={styles.forecastPeriod}>
-                  <Text style={styles.forecastIcon}>{weatherForecast.afternoon.icon}</Text>
-                  <Text style={styles.forecastLabel}>Siang</Text>
-                  <Text style={styles.forecastTemp}>{weatherForecast.afternoon.temperature}°</Text>
-                </View>
+                  {/* Connector */}
+                  <View style={styles.timelineConnector} />
 
-                {/* Connector */}
-                <View style={styles.timelineConnector} />
+                  {/* Afternoon */}
+                  <View style={styles.forecastPeriod}>
+                    <Text style={styles.forecastIcon}>{weatherForecast.afternoon.icon}</Text>
+                    <Text style={styles.forecastLabel}>Siang</Text>
+                    <Text style={styles.forecastTemp}>{weatherForecast.afternoon.temperature}°</Text>
+                  </View>
 
-                {/* Evening */}
-                <View style={styles.forecastPeriod}>
-                  <Text style={styles.forecastIcon}>{weatherForecast.evening.icon}</Text>
-                  <Text style={styles.forecastLabel}>Sore</Text>
-                  <Text style={styles.forecastTemp}>{weatherForecast.evening.temperature}°</Text>
+                  {/* Connector */}
+                  <View style={styles.timelineConnector} />
+
+                  {/* Evening */}
+                  <View style={styles.forecastPeriod}>
+                    <Text style={styles.forecastIcon}>{weatherForecast.evening.icon}</Text>
+                    <Text style={styles.forecastLabel}>Sore</Text>
+                    <Text style={styles.forecastTemp}>{weatherForecast.evening.temperature}°</Text>
+                  </View>
                 </View>
               </View>
-            </View>
-          )}
+            )}
+          </ScrollView>
 
-          {/* Burger Menu Button */}
+          {/* Burger Menu Button - Always Visible */}
           <TouchableOpacity
             onPress={() => setShowSettingsMenu(!showSettingsMenu)}
             style={styles.burgerButton}
@@ -531,57 +543,68 @@ const styles = StyleSheet.create({
   header: {
     paddingTop: 20,
     paddingBottom: 20,
-    paddingHorizontal: 24,
+    paddingHorizontal: width > 768 ? 24 : 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  headerLeft: {
+    flex: width < 768 ? 0.35 : 0.4,
+    marginRight: 12,
+  },
   headerTitle: {
-    fontSize: 32,
+    fontSize: width > 768 ? 32 : width > 480 ? 22 : 18,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   headerSubtitle: {
-    fontSize: 14,
+    fontSize: width > 768 ? 14 : 11,
     color: 'rgba(255,255,255,0.9)',
     marginTop: 4,
   },
   headerRight: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-  },
-  areaBadge: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
+    flex: width < 768 ? 0.65 : 0.6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
+  badgesContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    paddingRight: 8,
+  },
+  areaBadge: {
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    paddingVertical: width < 768 ? 6 : 8,
+    paddingHorizontal: width < 768 ? 10 : 16,
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: width < 768 ? 4 : 8,
+  },
   areaIcon: {
-    fontSize: 16,
+    fontSize: width < 768 ? 12 : 16,
   },
   areaText: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: width < 768 ? 11 : 14,
     fontWeight: '600',
   },
   weatherBadge: {
     backgroundColor: 'rgba(255,255,255,0.25)',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    paddingVertical: width < 768 ? 6 : 8,
+    paddingHorizontal: width < 768 ? 10 : 16,
     borderRadius: 20,
-    minHeight: 40,
+    minHeight: width < 768 ? 32 : 40,
     justifyContent: 'center',
   },
   forecastBadge: {
     backgroundColor: 'rgba(255,255,255,0.25)',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    paddingVertical: width < 768 ? 6 : 8,
+    paddingHorizontal: width < 768 ? 10 : 16,
     borderRadius: 20,
-    minHeight: 40,
+    minHeight: width < 768 ? 32 : 40,
     justifyContent: 'center',
   },
   weatherContainer: {
@@ -594,17 +617,17 @@ const styles = StyleSheet.create({
   },
   weatherLocation: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: width < 768 ? 9 : 11,
     fontWeight: '700',
     letterSpacing: 0.3,
   },
   weatherSeparator: {
     color: 'rgba(255,255,255,0.6)',
-    fontSize: 10,
+    fontSize: width < 768 ? 8 : 10,
   },
   weatherTime: {
     color: 'rgba(255,255,255,0.9)',
-    fontSize: 10,
+    fontSize: width < 768 ? 8 : 10,
     fontWeight: '500',
   },
   forecastTimeline: {
@@ -615,26 +638,26 @@ const styles = StyleSheet.create({
   forecastPeriod: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: width < 768 ? 2 : 3,
   },
   forecastIcon: {
-    fontSize: 16,
+    fontSize: width < 768 ? 12 : 16,
   },
   forecastLabel: {
     color: 'rgba(255,255,255,0.8)',
-    fontSize: 9,
+    fontSize: width < 768 ? 7 : 9,
     fontWeight: '600',
   },
   forecastTemp: {
     color: '#FFFFFF',
-    fontSize: 11,
+    fontSize: width < 768 ? 9 : 11,
     fontWeight: '700',
   },
   timelineConnector: {
-    width: 12,
+    width: width < 768 ? 8 : 12,
     height: 1,
     backgroundColor: 'rgba(255,255,255,0.4)',
-    marginHorizontal: 6,
+    marginHorizontal: width < 768 ? 4 : 6,
   },
   fallbackWeather: {
     flexDirection: 'row',
@@ -651,13 +674,14 @@ const styles = StyleSheet.create({
   },
   burgerButton: {
     backgroundColor: 'rgba(255,255,255,0.25)',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: width < 768 ? 6 : 8,
+    paddingHorizontal: width < 768 ? 8 : 12,
     borderRadius: 20,
+    marginLeft: 4,
   },
   burgerIcon: {
-    width: 24,
-    height: 24,
+    width: width < 768 ? 20 : 24,
+    height: width < 768 ? 20 : 24,
     // tintColor: '#FFFFFF',
   },
   overlay: {

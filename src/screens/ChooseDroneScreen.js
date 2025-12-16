@@ -110,23 +110,24 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: width > 768 ? width * 0.25 : 32,
-    paddingVertical: 40,
+    paddingHorizontal: width > 1024 ? width * 0.3 : width > 768 ? width * 0.2 : width > 480 ? 40 : 24,
+    paddingVertical: width > 768 ? 60 : 32,
   },
   // Elegant Header
   headerSection: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: width > 768 ? 40 : 32,
   },
   mainTitle: {
-    fontSize: width > 768 ? 32 : 26,
+    fontSize: width > 1024 ? 36 : width > 768 ? 30 : width > 480 ? 24 : 20,
     fontWeight: '700',
     color: '#0047AB',
     textAlign: 'center',
     marginBottom: 8,
+    paddingHorizontal: 16,
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: width > 768 ? 16 : 13,
     color: '#666',
     fontWeight: '500',
   },
@@ -134,7 +135,7 @@ const styles = StyleSheet.create({
   droneCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
-    padding: 32,
+    padding: width > 768 ? 40 : width > 480 ? 28 : 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
@@ -142,18 +143,18 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   cardTitle: {
-    fontSize: 24,
+    fontSize: width > 768 ? 28 : width > 480 ? 22 : 20,
     fontWeight: '700',
     color: '#0047AB',
-    marginBottom: 24,
+    marginBottom: width > 768 ? 28 : 20,
     textAlign: 'center',
   },
   // Info Groups
   infoGroup: {
-    marginBottom: 20,
+    marginBottom: width > 768 ? 20 : 16,
   },
   infoLabel: {
-    fontSize: 13,
+    fontSize: width > 768 ? 14 : 12,
     fontWeight: '600',
     color: '#0047AB',
     marginBottom: 8,
@@ -161,17 +162,17 @@ const styles = StyleSheet.create({
   infoBox: {
     backgroundColor: '#F5F9FF',
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: width > 768 ? 18 : 14,
+    paddingVertical: width > 768 ? 16 : 12,
   },
   infoValue: {
-    fontSize: 16,
+    fontSize: width > 768 ? 18 : 15,
     color: '#333',
     fontWeight: '600',
   },
   // Proceed Button
   proceedButtonContainer: {
-    marginTop: 12,
+    marginTop: width > 768 ? 16 : 12,
     borderRadius: 12,
     overflow: 'hidden',
     shadowColor: '#1E90FF',
@@ -181,24 +182,24 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   proceedButton: {
-    paddingVertical: 16,
-    paddingHorizontal: 32,
+    paddingVertical: width > 768 ? 18 : 14,
+    paddingHorizontal: width > 768 ? 36 : 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   proceedButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
+    fontSize: width > 768 ? 18 : 15,
     fontWeight: '700',
     letterSpacing: 0.5,
   },
   // Footer
   footer: {
     alignItems: 'center',
-    marginTop: 32,
+    marginTop: width > 768 ? 40 : 28,
   },
   footerVersion: {
-    fontSize: 12,
+    fontSize: width > 768 ? 13 : 11,
     color: '#999',
     fontWeight: '500',
   },

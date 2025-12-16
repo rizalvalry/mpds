@@ -3,12 +3,12 @@
     "name": "Motor Pool Drone Systems",
     "slug": "motor-pool-drone-systems",
     "version": "1.0.0",
-    "orientation": "landscape",
+    "orientation": "default",
     "icon": "./assets/icon-apps.jpg",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/droneai.jpg",
+      "image": "./assets/fly.gif",
       "resizeMode": "cover",
       "backgroundColor": "#00d9ff"
     },

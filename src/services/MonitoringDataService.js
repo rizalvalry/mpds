@@ -11,19 +11,21 @@ import { getTodaySession } from '../utils/uploadSessionStorage';
  */
 class MonitoringDataService {
   /**
-   * Get today's date in YYYY-MM-DD format (Jakarta timezone)
+   * Get today's date in YYYY-MM-DD format (Asia/Jakarta timezone)
    * @returns {string} Date string in format YYYY-MM-DD
    */
   getTodayDate() {
+    // Use toLocaleString with Asia/Jakarta timezone to get correct date
     const now = new Date();
-    // Convert to Jakarta timezone (UTC+7)
-    const jakartaTime = new Date(now.getTime() + (7 * 60 * 60 * 1000));
+    const jakartaDateString = now.toLocaleString('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
 
-    const year = jakartaTime.getFullYear();
-    const month = String(jakartaTime.getMonth() + 1).padStart(2, '0');
-    const day = String(jakartaTime.getDate()).padStart(2, '0');
-
-    return `${year}-${month}-${day}`;
+    // toLocaleString with 'en-CA' returns YYYY-MM-DD format directly
+    return jakartaDateString.split(',')[0]; // Remove time part if any
   }
 
   /**
@@ -175,57 +177,39 @@ class MonitoringDataService {
         areaBreakdown,
       });
 
-      // Calculate expected files per area from ALL API sessions (aggregate by area)
-      // This is the SOURCE OF TRUTH for total uploads per area
-      const areaUploadTotals = {};
-      apiData.forEach(session => {
-        if (session.area_handle && Array.isArray(session.area_handle) && session.start_uploads > 0) {
-          // Distribute uploads equally across areas
-          const uploadsPerArea = Math.ceil(session.start_uploads / session.area_handle.length);
-          session.area_handle.forEach(area => {
-            if (!areaUploadTotals[area]) {
-              areaUploadTotals[area] = 0;
-            }
-            areaUploadTotals[area] += uploadsPerArea;
-          });
-        }
-      });
-
-      console.log('[MonitoringDataService] ✅ Upload totals per area from API (SOURCE OF TRUTH):', areaUploadTotals);
+      // Use total start_uploads as the denominator for ALL areas
+      // This means each area shows: processed_in_area / total_start_uploads
+      // Example: If 695 files uploaded across C,D,K, then:
+      //   - Block C: 1/695
+      //   - Block D: 64/695
+      //   - Block K: 233/695
 
       const inProgress = [];
       const completed = [];
 
       finalAreaCodes.forEach((areaCode) => {
         const processedInArea = areaBreakdown[areaCode] || 0; // From Pusher events (detected + undetected)
-        const expectedInArea = areaUploadTotals[areaCode] || 0; // From API (start_uploads)
 
-        // Progress calculation: (detected + undetected) / start_uploads * 100%
-        const progress = expectedInArea > 0 ? (processedInArea / expectedInArea) * 100 : 0;
+        // Progress calculation: (processed_in_area / total_start_uploads) * 100%
+        const progress = totalUploaded > 0 ? (processedInArea / totalUploaded) * 100 : 0;
 
         const areaData = {
           areaCode,
-          processed: processedInArea, // Total processed (detected + undetected)
-          total: expectedInArea, // Total uploaded from API
+          processed: processedInArea,        // Processed files in this area (from Pusher)
+          total: totalUploaded,              // TOTAL start_uploads for ALL areas
           progress: Math.min(Math.round(progress), 100),
         };
 
-        // Only show areas that have uploads in API
-        if (expectedInArea > 0) {
-          // If processed >= expected, move to completed panel
-          if (processedInArea >= expectedInArea) {
+        // Only show areas that have processed files OR are in area_handle from API
+        const areaInAPI = allAreasFromAPI.has(areaCode);
+
+        if (areaInAPI || processedInArea > 0) {
+          // If processed equals total uploaded, move to completed panel
+          if (processedInArea >= totalUploaded) {
             completed.push(areaData);
           } else {
             inProgress.push(areaData);
           }
-        } else if (processedInArea > 0) {
-          // Fallback: Show areas with Pusher data but no API data (real-time mode)
-          inProgress.push({
-            areaCode,
-            processed: processedInArea,
-            total: processedInArea, // Use processed as total in real-time mode
-            progress: 100,
-          });
         }
       });
 
