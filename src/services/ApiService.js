@@ -457,6 +457,54 @@ export class ApiService {
     return this.fetchData({ method: 'GET', url });
   }
 
+  /**
+   * Validate area from image file (backend extracts GPS from EXIF)
+   * @param {string} imageUri - Local file URI
+   * @param {string} expectedAreaBlock - Expected area block code (optional)
+   * @returns {Promise<Object>} Area validation result
+   */
+  async validateAreaFromImage(imageUri, expectedAreaBlock = null) {
+    await this.init();
+
+    // Create FormData for multipart/form-data request
+    const formData = new FormData();
+
+    // Add image file
+    const filename = imageUri.split('/').pop();
+    const match = /\.(\w+)$/.exec(filename);
+    const type = match ? `image/${match[1]}` : 'image/jpeg';
+
+    formData.append('image', {
+      uri: imageUri,
+      name: filename,
+      type: type,
+    });
+
+    // Add expected area block if provided
+    if (expectedAreaBlock) {
+      formData.append('expectedAreaBlock', expectedAreaBlock);
+    }
+
+    const url = this.buildUrl('/cases/area/validate/image');
+
+    // Use fetch directly for FormData
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        // Don't set Content-Type - let browser set it with boundary
+        // 'Content-Type': 'multipart/form-data' is auto-added by fetch
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    return await response.json();
+  }
+
   // Dashboard APIs - exact match with Flutter main_api.dart
   async getDashboardData(type, startDate = null, endDate = null) {
     await this.init(); // Ensure tokens are loaded

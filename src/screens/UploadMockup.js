@@ -6,7 +6,6 @@ import { useUpload } from '../contexts/UploadContext';
 import DynamicHeader from '../components/shared/DynamicHeader';
 import { useTheme } from '../contexts/ThemeContext';
 import apiService from '../services/ApiService';
-import { extractGPSFromAsset } from '../utils/exifExtractor';
 import { validateFirstImage } from '../utils/areaValidator';
 
 const { width } = Dimensions.get('window');
@@ -86,31 +85,16 @@ export default function UploadMockup({
       try {
         const firstImage = selectedImages[0];
 
-        // Try to extract GPS from first image
-        const gps = await extractGPSFromAsset(firstImage);
+        console.log('[UploadMockup] Validating first image using backend extraction...');
 
-        if (!gps || !gps.latitude || !gps.longitude) {
-          // No GPS data available - DocumentPicker limitation
-          console.warn('[UploadMockup] No GPS data found in image (DocumentPicker limitation)');
-          setAreaValidation({
-            isValid: false,
-            checked: true,
-            detectedBlock: null,
-            message: '⚠️ Cannot extract GPS from image. Please ensure images have location data.',
-          });
-          setIsValidatingArea(false);
-          return;
-        }
-
-        console.log('[UploadMockup] GPS extracted from first image:', gps);
-
-        // Validate area using API
+        // Validate area using backend GPS extraction
+        // Backend will extract GPS from EXIF and validate area
         const validation = await validateFirstImage(
-          { ...firstImage, ...gps },
+          firstImage, // Only need URI, backend will extract GPS
           selectedAreaBlock
         );
 
-        console.log('[UploadMockup] Validation result:', validation);
+        console.log('[UploadMockup] Backend validation result:', validation);
 
         setAreaValidation({
           isValid: validation.valid,

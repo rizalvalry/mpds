@@ -115,29 +115,67 @@ export const validateImageArea = async (latitude, longitude, expectedArea) => {
 };
 
 /**
- * Validate first image in upload batch (for early validation)
+ * Validate first image using backend GPS extraction (recommended)
+ * Backend extracts GPS from EXIF, eliminating frontend library issues
  *
- * @param {object} firstImage - First image asset with GPS data
+ * @param {object} firstImage - First image asset with URI
  * @param {string} expectedArea - Expected area block code
  * @returns {Promise<{valid: boolean, detectedArea: string | null, message: string}>}
  */
 export const validateFirstImage = async (firstImage, expectedArea) => {
-  // Check if image has GPS data
-  if (!firstImage.latitude || !firstImage.longitude) {
+  try {
+    console.log('[AreaValidator] Validating image using backend extraction:', {
+      uri: firstImage.uri,
+      expectedArea,
+    });
+
+    // Use backend to extract GPS and validate
+    const result = await apiService.validateAreaFromImage(firstImage.uri, expectedArea);
+
+    console.log('[AreaValidator] Backend validation response:', result);
+
+    if (!result.success) {
+      return {
+        valid: false,
+        detectedArea: null,
+        message: result.message || 'Failed to extract GPS from image',
+        error: 'backend_validation_failed',
+      };
+    }
+
+    // Extract area block from response
+    const detectedArea = result.data && result.data.length > 0 ? result.data[0].block : null;
+
+    if (!detectedArea) {
+      return {
+        valid: false,
+        detectedArea: null,
+        message: 'No area detected from image GPS coordinates',
+        error: 'no_area_detected',
+      };
+    }
+
+    // Check if area matches expected
+    const isValid = detectedArea === expectedArea;
+
+    return {
+      valid: isValid,
+      detectedArea: detectedArea,
+      message: isValid
+        ? `✓ Image location validated: Block ${detectedArea}`
+        : `Image GPS location is in Block ${detectedArea}, but you selected Block ${expectedArea}`,
+      areaInfo: result.data[0],
+    };
+
+  } catch (error) {
+    console.error('[AreaValidator] Backend validation error:', error);
     return {
       valid: false,
       detectedArea: null,
-      message: 'No GPS data found in image EXIF. Please ensure your images contain GPS coordinates.',
-      error: 'no_gps_data',
+      message: `Validation error: ${error.message}`,
+      error: 'validation_error',
     };
   }
-
-  // Validate area
-  return await validateImageArea(
-    firstImage.latitude,
-    firstImage.longitude,
-    expectedArea
-  );
 };
 
 /**
