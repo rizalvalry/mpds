@@ -3,12 +3,12 @@
  * Extracts GPS coordinates from image metadata
  */
 
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
-import piexif from 'piexifjs';
+import ExifReader from 'exifreader';
 
 /**
- * Extract GPS coordinates from image EXIF data using piexifjs
+ * Extract GPS coordinates from image EXIF data using ExifReader
  *
  * @param {string} imageUri - Image URI from document picker or file system
  * @returns {Promise<{latitude: number, longitude: number} | null>}
@@ -17,34 +17,41 @@ export const extractGPSFromImage = async (imageUri) => {
   try {
     console.log('[ExifExtractor] Extracting GPS from:', imageUri);
 
-    // Read image as base64 (use string 'base64' instead of EncodingType.Base64)
+    // Read image file info
+    const fileInfo = await FileSystem.getInfoAsync(imageUri);
+
+    if (!fileInfo.exists) {
+      console.warn('[ExifExtractor] File does not exist:', imageUri);
+      return null;
+    }
+
+    // Read file as base64
     const base64 = await FileSystem.readAsStringAsync(imageUri, {
-      encoding: 'base64',
+      encoding: FileSystem.EncodingType.Base64,
     });
 
-    // Add data URI prefix for piexifjs
-    const dataUri = `data:image/jpeg;base64,${base64}`;
+    // Convert base64 to ArrayBuffer for ExifReader
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
 
-    // Extract EXIF data using piexifjs
-    const exifData = piexif.load(dataUri);
+    // Parse EXIF data using ExifReader
+    const tags = ExifReader.load(bytes.buffer);
 
-    if (exifData.GPS && Object.keys(exifData.GPS).length > 0) {
-      const gps = exifData.GPS;
+    console.log('[ExifExtractor] EXIF tags found:', Object.keys(tags).filter(k => k.startsWith('GPS')));
 
-      // Extract GPS coordinates
-      const latDMS = gps[piexif.GPSIFD.GPSLatitude];
-      const latRef = gps[piexif.GPSIFD.GPSLatitudeRef];
-      const lonDMS = gps[piexif.GPSIFD.GPSLongitude];
-      const lonRef = gps[piexif.GPSIFD.GPSLongitudeRef];
+    // Extract GPS coordinates
+    if (tags.GPSLatitude && tags.GPSLongitude) {
+      const latitude = tags.GPSLatitude.description;
+      const longitude = tags.GPSLongitude.description;
 
-      if (latDMS && lonDMS) {
-        // Convert DMS array to decimal degrees
-        const latitude = convertGPSToDD(latDMS, latRef);
-        const longitude = convertGPSToDD(lonDMS, lonRef);
-
-        console.log('[ExifExtractor] GPS extracted from file:', { latitude, longitude });
-        return { latitude, longitude };
-      }
+      console.log('[ExifExtractor] GPS extracted from file:', { latitude, longitude });
+      return {
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude)
+      };
     }
 
     console.warn('[ExifExtractor] No GPS data found in EXIF');
@@ -54,28 +61,6 @@ export const extractGPSFromImage = async (imageUri) => {
     console.error('[ExifExtractor] Error extracting GPS:', error);
     return null;
   }
-};
-
-/**
- * Convert GPS DMS format from piexifjs to decimal degrees
- *
- * @param {Array} dms - [[degrees, 1], [minutes, 1], [seconds, precision]]
- * @param {string} ref - Reference (N/S for latitude, E/W for longitude)
- * @returns {number}
- */
-const convertGPSToDD = (dms, ref) => {
-  const degrees = dms[0][0] / dms[0][1];
-  const minutes = dms[1][0] / dms[1][1];
-  const seconds = dms[2][0] / dms[2][1];
-
-  let dd = degrees + (minutes / 60) + (seconds / 3600);
-
-  // Apply reference (negative for S and W)
-  if (ref === 'S' || ref === 'W') {
-    dd = -dd;
-  }
-
-  return dd;
 };
 
 /**
