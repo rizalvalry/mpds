@@ -3,12 +3,11 @@
  * Extracts GPS coordinates from image metadata
  */
 
-import * as FileSystem from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
-import ExifReader from 'exifreader';
+import RNExif from 'react-native-exif';
 
 /**
- * Extract GPS coordinates from image EXIF data using ExifReader
+ * Extract GPS coordinates from image EXIF data using react-native-exif
  *
  * @param {string} imageUri - Image URI from document picker or file system
  * @returns {Promise<{latitude: number, longitude: number} | null>}
@@ -17,40 +16,43 @@ export const extractGPSFromImage = async (imageUri) => {
   try {
     console.log('[ExifExtractor] Extracting GPS from:', imageUri);
 
-    // Read image file info
-    const fileInfo = await FileSystem.getInfoAsync(imageUri);
-
-    if (!fileInfo.exists) {
-      console.warn('[ExifExtractor] File does not exist:', imageUri);
-      return null;
+    // Convert file:// URI to platform-specific path
+    let filePath = imageUri;
+    if (imageUri.startsWith('file://')) {
+      filePath = imageUri.replace('file://', '');
     }
 
-    // Read file as base64
-    const base64 = await FileSystem.readAsStringAsync(imageUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+    // Read EXIF data using react-native-exif
+    const exifData = await RNExif.getExif(filePath);
 
-    // Convert base64 to ArrayBuffer for ExifReader
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
+    console.log('[ExifExtractor] EXIF data keys:', Object.keys(exifData));
 
-    // Parse EXIF data using ExifReader
-    const tags = ExifReader.load(bytes.buffer);
+    // Check for GPS coordinates
+    if (exifData.GPSLatitude && exifData.GPSLongitude) {
+      let latitude = exifData.GPSLatitude;
+      let longitude = exifData.GPSLongitude;
 
-    console.log('[ExifExtractor] EXIF tags found:', Object.keys(tags).filter(k => k.startsWith('GPS')));
-
-    // Extract GPS coordinates
-    if (tags.GPSLatitude && tags.GPSLongitude) {
-      const latitude = tags.GPSLatitude.description;
-      const longitude = tags.GPSLongitude.description;
+      // Handle reference (N/S for latitude, E/W for longitude)
+      if (exifData.GPSLatitudeRef === 'S') {
+        latitude = -Math.abs(latitude);
+      }
+      if (exifData.GPSLongitudeRef === 'W') {
+        longitude = -Math.abs(longitude);
+      }
 
       console.log('[ExifExtractor] GPS extracted from file:', { latitude, longitude });
+      return { latitude, longitude };
+    }
+
+    // Fallback: Check for original GPS data
+    if (exifData.latitude && exifData.longitude) {
+      console.log('[ExifExtractor] GPS found in exifData:', {
+        latitude: exifData.latitude,
+        longitude: exifData.longitude
+      });
       return {
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude)
+        latitude: exifData.latitude,
+        longitude: exifData.longitude
       };
     }
 
