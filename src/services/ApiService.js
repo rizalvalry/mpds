@@ -451,6 +451,12 @@ export class ApiService {
     return this.fetchData({ method: 'GET', url });
   }
 
+  async validateArea(latitude, longitude) {
+    await this.init(); // Ensure tokens are loaded
+    const url = this.buildUrl('/cases/area/validate', { lat: latitude, long: longitude });
+    return this.fetchData({ method: 'GET', url });
+  }
+
   // Dashboard APIs - exact match with Flutter main_api.dart
   async getDashboardData(type, startDate = null, endDate = null) {
     await this.init(); // Ensure tokens are loaded

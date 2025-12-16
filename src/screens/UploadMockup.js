@@ -6,6 +6,8 @@ import { useUpload } from '../contexts/UploadContext';
 import DynamicHeader from '../components/shared/DynamicHeader';
 import { useTheme } from '../contexts/ThemeContext';
 import apiService from '../services/ApiService';
+import { extractGPSFromAsset } from '../utils/exifExtractor';
+import { validateFirstImage } from '../utils/areaValidator';
 
 const { width } = Dimensions.get('window');
 
@@ -36,6 +38,15 @@ export default function UploadMockup({
   const [showAreaDropdown, setShowAreaDropdown] = useState(false);
   const [areaList, setAreaList] = useState([]); // List of all available areas from API
 
+  // Area validation state
+  const [isValidatingArea, setIsValidatingArea] = useState(false);
+  const [areaValidation, setAreaValidation] = useState({
+    isValid: false,
+    checked: false,
+    detectedBlock: null,
+    message: '',
+  });
+
   // Fetch area list from API on mount
   useEffect(() => {
     const fetchAreaList = async () => {
@@ -54,6 +65,95 @@ export default function UploadMockup({
 
     fetchAreaList();
   }, []);
+
+  // Validate area when both area and images are selected
+  useEffect(() => {
+    const validateAreaSelection = async () => {
+      // Only validate if both area and images are selected
+      if (!selectedAreaBlock || selectedImages.length === 0) {
+        setAreaValidation({
+          isValid: false,
+          checked: false,
+          detectedBlock: null,
+          message: '',
+        });
+        return;
+      }
+
+      setIsValidatingArea(true);
+      console.log('[UploadMockup] Validating area selection...');
+
+      try {
+        const firstImage = selectedImages[0];
+
+        // Try to extract GPS from first image
+        const gps = await extractGPSFromAsset(firstImage);
+
+        if (!gps || !gps.latitude || !gps.longitude) {
+          // No GPS data available - DocumentPicker limitation
+          console.warn('[UploadMockup] No GPS data found in image (DocumentPicker limitation)');
+          setAreaValidation({
+            isValid: false,
+            checked: true,
+            detectedBlock: null,
+            message: '⚠️ Cannot extract GPS from image. Please ensure images have location data.',
+          });
+          setIsValidatingArea(false);
+          return;
+        }
+
+        console.log('[UploadMockup] GPS extracted from first image:', gps);
+
+        // Validate area using API
+        const validation = await validateFirstImage(
+          { ...firstImage, ...gps },
+          selectedAreaBlock
+        );
+
+        console.log('[UploadMockup] Validation result:', validation);
+
+        setAreaValidation({
+          isValid: validation.valid,
+          checked: true,
+          detectedBlock: validation.detectedArea,
+          message: validation.message,
+        });
+
+        // Show alert if validation fails
+        if (!validation.valid) {
+          Alert.alert(
+            'Area Mismatch',
+            validation.message,
+            [
+              {
+                text: 'Cancel',
+                style: 'cancel',
+              },
+              validation.detectedArea && {
+                text: `Use Block ${validation.detectedArea}`,
+                onPress: () => {
+                  setSelectedAreaBlock(validation.detectedArea);
+                  console.log(`[UploadMockup] Switched to detected area: ${validation.detectedArea}`);
+                },
+              },
+            ].filter(Boolean)
+          );
+        }
+      } catch (error) {
+        console.error('[UploadMockup] Error validating area:', error);
+        setAreaValidation({
+          isValid: false,
+          checked: true,
+          detectedBlock: null,
+          message: `❌ Validation error: ${error.message}`,
+        });
+      } finally {
+        setIsValidatingArea(false);
+      }
+    };
+
+    validateAreaSelection();
+  }, [selectedAreaBlock, selectedImages]);
 
   // Determine what to show in preview panel
   const hasUploadHistory = uploadedFiles.length > 0;
@@ -774,7 +874,11 @@ export default function UploadMockup({
                 borderColor: '#E5E7EB',
                 maxHeight: 200,
               }}>
-                <ScrollView>
+                <ScrollView
+                  nestedScrollEnabled={true}
+                  showsVerticalScrollIndicator={true}
+                  style={{ maxHeight: 200 }}
+                >
                   {areaList.map((area) => (
                     <TouchableOpacity
                       key={area.id}
@@ -836,12 +940,54 @@ export default function UploadMockup({
           </View>
         )}
 
+        {/* Validation Status Indicator */}
+        {selectedImages.length > 0 && selectedAreaBlock && areaValidation.checked && (
+          <View style={{
+            backgroundColor: areaValidation.isValid ? '#D1FAE5' : '#FEE2E2',
+            borderRadius: 12,
+            padding: 16,
+            marginTop: 16,
+            borderLeftWidth: 4,
+            borderLeftColor: areaValidation.isValid ? '#10B981' : '#EF4444',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+          }}>
+            {isValidatingArea ? (
+              <ActivityIndicator size="small" color={areaValidation.isValid ? '#10B981' : '#EF4444'} />
+            ) : (
+              <Text style={{ fontSize: 24 }}>
+                {areaValidation.isValid ? '✅' : '❌'}
+              </Text>
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={{
+                fontSize: 14,
+                fontWeight: '700',
+                color: areaValidation.isValid ? '#065F46' : '#991B1B',
+                marginBottom: 2,
+              }}>
+                {isValidatingArea ? 'Validating area...' : areaValidation.isValid ? 'Area Validated' : 'Area Validation Failed'}
+              </Text>
+              <Text style={{
+                fontSize: 12,
+                color: areaValidation.isValid ? '#065F46' : '#991B1B',
+              }}>
+                {areaValidation.message || (areaValidation.isValid
+                  ? `Images match Block ${selectedAreaBlock}`
+                  : 'Please check your area selection')}
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Upload Button (Below Both Panels) */}
         {selectedImages.length > 0 && !isUploading && (
           <TouchableOpacity
             onPress={uploadImages}
+            disabled={!selectedAreaBlock || (areaValidation.checked && !areaValidation.isValid) || isValidatingArea}
             style={{
-              backgroundColor: '#10B981',
+              backgroundColor: (!selectedAreaBlock || (areaValidation.checked && !areaValidation.isValid) || isValidatingArea) ? '#9CA3AF' : '#10B981',
               paddingVertical: 18,
               borderRadius: 12,
               flexDirection: 'row',
@@ -849,17 +995,29 @@ export default function UploadMockup({
               justifyContent: 'center',
               gap: 12,
               marginTop: 24,
-              shadowColor: '#10B981',
+              shadowColor: (!selectedAreaBlock || (areaValidation.checked && !areaValidation.isValid) || isValidatingArea) ? '#6B7280' : '#10B981',
               shadowOffset: { width: 0, height: 6 },
               shadowOpacity: 0.4,
               shadowRadius: 10,
               elevation: 6,
+              opacity: (!selectedAreaBlock || (areaValidation.checked && !areaValidation.isValid) || isValidatingArea) ? 0.6 : 1,
             }}
           >
-            <Text style={{ fontSize: 24 }}>⬆️</Text>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: '#FFFFFF' }}>
-              Upload {selectedImages.length} Gambar ({Math.ceil(selectedImages.length / BATCH_SIZE)} Batch)
-            </Text>
+            {isValidatingArea ? (
+              <>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+                <Text style={{ fontSize: 18, fontWeight: '700', color: '#FFFFFF' }}>
+                  Validating Area...
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={{ fontSize: 24 }}>⬆️</Text>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: '#FFFFFF' }}>
+                  Upload {selectedImages.length} Gambar ({Math.ceil(selectedImages.length / BATCH_SIZE)} Batch)
+                </Text>
+              </>
+            )}
           </TouchableOpacity>
         )}
 
@@ -882,6 +1040,7 @@ export default function UploadMockup({
             <Text style={{ fontSize: 12, color: '#0369A1', lineHeight: 18 }}>
               • Format: JPG, JPEG, PNG{'\n'}
               • Batch size: {BATCH_SIZE} images per batch{'\n'}
+              • Images must contain GPS metadata for area validation{'\n'}
               • Gambar akan diproses AI untuk deteksi bird drops{'\n'}
               • Hasil dapat dilihat di menu Cases
             </Text>
