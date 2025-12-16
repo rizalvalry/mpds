@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Dimensions, Alert, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { useUpload } from '../contexts/UploadContext';
 import DynamicHeader from '../components/shared/DynamicHeader';
 import { useTheme } from '../contexts/ThemeContext';
@@ -167,28 +167,41 @@ export default function UploadMockup({
     }
   };
 
-  // Pick files using document picker
+  // Pick files using image picker (supports EXIF/GPS extraction)
   const pickFiles = async () => {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['image/jpeg', 'image/jpg', 'image/png'],
-        multiple: true,
-        copyToCacheDirectory: true,
+      // Request media library permissions
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Aplikasi memerlukan izin akses galeri untuk memilih gambar.'
+        );
+        return;
+      }
+
+      // Launch image picker with EXIF support
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        exif: true, // Enable EXIF extraction (including GPS metadata)
+        quality: 1,
       });
 
-      if (result.type === 'success' || !result.canceled) {
-        const files = result.assets || [result];
-        const newImages = files.map((file, index) => ({
+      if (!result.canceled && result.assets) {
+        const newImages = result.assets.map((asset, index) => ({
           id: Date.now() + index,
-          uri: file.uri,
-          fileName: file.name,
-          type: file.mimeType || 'image/jpeg',
-          size: file.size || 0,
-          fileSize: file.size || 0,
+          uri: asset.uri,
+          fileName: asset.fileName || asset.uri.split('/').pop(),
+          type: asset.type || 'image/jpeg',
+          size: asset.fileSize || 0,
+          fileSize: asset.fileSize || 0,
+          exif: asset.exif, // EXIF data with GPS coordinates
+          location: asset.location, // Direct location data if available
         }));
 
         setSelectedImages(prev => [...prev, ...newImages]);
-        console.log(`[Upload] ${newImages.length} files selected`);
+        console.log(`[Upload] ${newImages.length} files selected with EXIF support`);
       }
     } catch (error) {
       console.error('Error picking files:', error);
@@ -509,7 +522,7 @@ export default function UploadMockup({
               </View>
 
               <Text style={{ fontSize: 24, fontWeight: '700', color: '#1F2937', marginBottom: 8 }}>
-                Browse File test
+                Browse File
               </Text>
             </TouchableOpacity>
 
