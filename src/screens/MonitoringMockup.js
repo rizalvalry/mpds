@@ -315,10 +315,18 @@ export default function MonitoringMockup({
 
       if (uploadDetailsResponse.success && uploadDetailsResponse.data) {
         uploadDetailsResponse.data.forEach((uploadSession) => {
-          const areaHandle = uploadSession.area_handle; // Single string "C" from compatibility layer
+          // Handle area_handle being an array (e.g. ["T"]) or string
+          let areaHandle = uploadSession.area_handle;
+          if (Array.isArray(areaHandle)) {
+            // If it's an array, take the first element (assuming single block per session)
+            // or join them if needed, but usually it's single letter
+            areaHandle = areaHandle.length > 0 ? areaHandle[0] : '';
+          }
           const phase = uploadSession.phase || 0;
           const key = `${areaHandle}-${phase}`;
           const createdAt = uploadSession.created_at ? new Date(uploadSession.created_at) : null;
+          const detectionStartedAt = uploadSession.detection_started_at ? new Date(uploadSession.detection_started_at) : null;
+          const detectionCompletedAt = uploadSession.detection_completed_at ? new Date(uploadSession.detection_completed_at) : null;
 
           // FILTER: Only show blocks that belong to user's area_code
           // If userAreaCodes is empty, show all (admin view)
@@ -335,16 +343,30 @@ export default function MonitoringMockup({
               startUploads: 0,
               operator: uploadSession.operator,
               sessionId: uploadSession.id,
+              totalDetected: 0,
+              totalUndetected: 0,
               createdAt: createdAt, // Track upload start time
+              detectionStartedAt: detectionStartedAt, // Track when detection started
+              detectionCompletedAt: detectionCompletedAt, // Track when detection completed
             };
           }
 
           uploadSessions[key].startUploads += (uploadSession.start_uploads || 0);
+          uploadSessions[key].totalDetected += (uploadSession.total_detected || 0);
+          uploadSessions[key].totalUndetected += (uploadSession.total_undetected || 0);
           totalUploaded += (uploadSession.start_uploads || 0);
 
           // Track oldest created_at for this area-phase combination
           if (createdAt && (!uploadSessions[key].createdAt || createdAt < uploadSessions[key].createdAt)) {
             uploadSessions[key].createdAt = createdAt;
+          }
+
+          // Track detection timestamps (use the latest non-null values)
+          if (detectionStartedAt && (!uploadSessions[key].detectionStartedAt || detectionStartedAt < uploadSessions[key].detectionStartedAt)) {
+            uploadSessions[key].detectionStartedAt = detectionStartedAt;
+          }
+          if (detectionCompletedAt) {
+            uploadSessions[key].detectionCompletedAt = detectionCompletedAt;
           }
         });
       }
@@ -404,9 +426,28 @@ export default function MonitoringMockup({
 
         // Get detection count for this area_code
         const areaProgress = detectionCounts[areaCode] || { detected: 0, undetected: 0, total_processed: 0 };
-        const detected = areaProgress.detected || 0;
-        const undetected = areaProgress.undetected || 0;
-        let processed = areaProgress.total_processed || 0;
+
+        // PERSISTENCE LOGIC:
+        // Use database counts (upload_details) as fallback/baseline if Pusher/API counts are missing or lower.
+        // This handles app reloads where Pusher data is lost but DB is up to date (via backend worker).
+        const dbDetected = session.totalDetected || 0;
+        const dbUndetected = session.totalUndetected || 0;
+        const dbProcessed = dbDetected + dbUndetected;
+
+        const pusherProcessed = areaProgress.total_processed || 0;
+
+        // Use the larger value to ensure we show maximum known progress
+        let processed = Math.max(pusherProcessed, dbProcessed);
+
+        let detected, undetected;
+
+        if (pusherProcessed >= dbProcessed) {
+          detected = areaProgress.detected || 0;
+          undetected = areaProgress.undetected || 0;
+        } else {
+          detected = dbDetected;
+          undetected = dbUndetected;
+        }
 
         // REMOVED: 60-minute auto-complete logic
         // Now relying on 5-minute polling to get accurate data from API
@@ -432,6 +473,9 @@ export default function MonitoringMockup({
           operator: session.operator,
           sessionId: session.sessionId,
           queued: Math.max(0, startUploads - processed), // Calculate queued items
+          createdAt: session.createdAt, // Upload start time
+          detectionStartedAt: session.detectionStartedAt, // Detection start time
+          detectionCompletedAt: session.detectionCompletedAt, // Detection complete time
         };
 
         // Determine if completed or in progress
@@ -670,6 +714,25 @@ export default function MonitoringMockup({
                           </Text>
                         </View>
                       )}
+                      {/* Detection Timestamps */}
+                      <View style={styles.timestampContainer}>
+                        <View style={styles.timestampRow}>
+                          <Text style={styles.timestampLabel}>🚀 Start Detection:</Text>
+                          <Text style={styles.timestampValue}>
+                            {area.detectionStartedAt
+                              ? area.detectionStartedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                              : 'Waiting...'}
+                          </Text>
+                        </View>
+                        <View style={styles.timestampRow}>
+                          <Text style={styles.timestampLabel}>✅ End Detection:</Text>
+                          <Text style={styles.timestampValue}>
+                            {area.detectionCompletedAt
+                              ? area.detectionCompletedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                              : 'In progress...'}
+                          </Text>
+                        </View>
+                      </View>
                     </View>
                   );
                 })
@@ -1098,5 +1161,28 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     fontStyle: 'italic',
     marginTop: 4,
+  },
+  // Timestamp styles for detection start/end times
+  timestampContainer: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+  timestampRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  timestampLabel: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#64748B',
+  },
+  timestampValue: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#0EA5E9',
   },
 });

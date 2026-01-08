@@ -242,8 +242,8 @@ export default function DashboardScreen({ session, setSession }) {
   const getTotalBirdDrops = () => {
     if (!dashboardStatus) return 0;
     return (dashboardStatus.pending || 0) +
-           (dashboardStatus.true_detection || 0) +
-           (dashboardStatus.false_detection || 0);
+      (dashboardStatus.true_detection || 0) +
+      (dashboardStatus.false_detection || 0);
   };
 
   const handleLogout = async () => {
@@ -321,7 +321,7 @@ export default function DashboardScreen({ session, setSession }) {
         );
       case 'dashboard':
       default:
-        return <DashboardComplete />;
+        return <DashboardComplete session={session} />;
     }
   };
 

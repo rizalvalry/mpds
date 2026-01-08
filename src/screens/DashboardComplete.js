@@ -8,7 +8,8 @@ import { useTheme } from '../contexts/ThemeContext';
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width > 1200 ? (width - 96) / 5 : (width - 72) / 5; // For 5 cards (filter + 4 stats)
 
-export default function DashboardComplete() {
+// Accept session prop for pilot group filtering
+export default function DashboardComplete({ session }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState('today'); // today, week, month
@@ -27,37 +28,37 @@ export default function DashboardComplete() {
   const theme = useMemo(() => (
     isDarkMode
       ? {
-          background: '#050A27',
-          surface: 'rgba(13, 24, 54, 0.95)',
-          surfaceAlt: 'rgba(20, 34, 74, 0.9)',
-          surfaceMuted: 'rgba(25, 41, 89, 0.65)',
-          border: 'rgba(79, 132, 255, 0.35)',
-          textPrimary: '#E8ECFF',
-          textSecondary: 'rgba(198, 210, 255, 0.82)',
-          textMuted: 'rgba(198, 210, 255, 0.6)',
-          accent: '#38BDF8',
-          accentStrong: '#2563EB',
-          warning: '#FACC15',
-          chipActiveBg: 'rgba(56, 189, 248, 0.18)',
-          chipActiveText: '#F0F4FF',
-          chipInactiveText: 'rgba(198, 210, 255, 0.6)',
-        }
+        background: '#050A27',
+        surface: 'rgba(13, 24, 54, 0.95)',
+        surfaceAlt: 'rgba(20, 34, 74, 0.9)',
+        surfaceMuted: 'rgba(25, 41, 89, 0.65)',
+        border: 'rgba(79, 132, 255, 0.35)',
+        textPrimary: '#E8ECFF',
+        textSecondary: 'rgba(198, 210, 255, 0.82)',
+        textMuted: 'rgba(198, 210, 255, 0.6)',
+        accent: '#38BDF8',
+        accentStrong: '#2563EB',
+        warning: '#FACC15',
+        chipActiveBg: 'rgba(56, 189, 248, 0.18)',
+        chipActiveText: '#F0F4FF',
+        chipInactiveText: 'rgba(198, 210, 255, 0.6)',
+      }
       : {
-          background: '#F5F5F5',
-          surface: '#FFFFFF',
-          surfaceAlt: '#FFFFFF',
-          surfaceMuted: '#F3F4F6',
-          border: 'rgba(15, 23, 42, 0.08)',
-          textPrimary: '#1F2937',
-          textSecondary: '#6B7280',
-          textMuted: '#9CA3AF',
-          accent: '#0EA5E9',
-          accentStrong: '#1E40AF',
-          warning: '#F59E0B',
-          chipActiveBg: '#FFFFFF',
-          chipActiveText: '#1F2937',
-          chipInactiveText: '#6B7280',
-        }
+        background: '#F5F5F5',
+        surface: '#FFFFFF',
+        surfaceAlt: '#FFFFFF',
+        surfaceMuted: '#F3F4F6',
+        border: 'rgba(15, 23, 42, 0.08)',
+        textPrimary: '#1F2937',
+        textSecondary: '#6B7280',
+        textMuted: '#9CA3AF',
+        accent: '#0EA5E9',
+        accentStrong: '#1E40AF',
+        warning: '#F59E0B',
+        chipActiveBg: '#FFFFFF',
+        chipActiveText: '#1F2937',
+        chipInactiveText: '#6B7280',
+      }
   ), [isDarkMode]);
 
   const chartConfig = useMemo(() => ({
@@ -112,12 +113,20 @@ export default function DashboardComplete() {
       }
 
       // Fetch all dashboard data dari API seperti Flutter
+      // Get user's area_codes for pilot group filtering
+      const userAreaCodes = session?.area_code || [];
+      console.log('[DashboardComplete] 🔑 Session received:', session ? 'YES' : 'NO');
+      console.log('[DashboardComplete] 🔑 Session username:', session?.username);
+      console.log('[DashboardComplete] 📊 User area_codes:', userAreaCodes);
+      console.log('[DashboardComplete] 📊 Will filter by:', userAreaCodes.length > 0 ? userAreaCodes.join(',') : 'ALL BLOCKS (no filter)');
+
       const [overviewRes, statusRes, workerRes, bdRes, bdPerBlockRes] = await Promise.all([
         apiService.getDashboardOverview(),
         apiService.getDashboardStatus(selectedFilter),
         apiService.getDashboardWorker(selectedFilter),
         apiService.getDashboardData(selectedFilter, startDate, endDate),
-        apiService.getDashboardBDPerBlock(selectedFilter),
+        // Pass areaCodes to filter bird_drops_by_block by pilot's blocks
+        apiService.getDashboardBDPerBlock(selectedFilter, userAreaCodes.length > 0 ? userAreaCodes : null),
       ]);
 
       console.log('Dashboard Overview:', overviewRes);
@@ -165,7 +174,18 @@ export default function DashboardComplete() {
 
     try {
       setExporting(true);
-      const response = await apiService.exportDashboard(selectedFilter);
+
+      // Get pilot info from session for filtered export
+      const userAreaCodes = session?.area_code || [];
+      const pilotName = session?.username ? `Pilot ${session.username}` : null;
+
+      console.log('[DashboardComplete] 📄 Export with pilot filter:', { pilotName, areaCodes: userAreaCodes });
+
+      const response = await apiService.exportDashboard(
+        selectedFilter,
+        userAreaCodes.length > 0 ? userAreaCodes : null,
+        pilotName
+      );
 
       if (response?.status_code === 200 && response?.report_url) {
         await Linking.openURL(response.report_url);
@@ -292,7 +312,7 @@ export default function DashboardComplete() {
         data.push(value);
 
         if (dataPoint) {
-          console.log(`[getBirdDropBarData] Month ${i} (${months[i-1]}): Found indicator ${dataPoint.indicator} with value ${value}`);
+          console.log(`[getBirdDropBarData] Month ${i} (${months[i - 1]}): Found indicator ${dataPoint.indicator} with value ${value}`);
         }
       }
     }
@@ -324,397 +344,397 @@ export default function DashboardComplete() {
         </View>
       ) : (
         <>
-            {/* Filter + Stats Cards Row */}
-            <View style={styles.statsRow}>
-              {/* Filter Chips - Vertical */}
-              <View style={[
-                styles.filterContainer,
-                isDarkMode ? styles.filterContainerDark : styles.filterContainerLight,
-                { borderColor: theme.border, borderWidth: isDarkMode ? 1 : 0 }
-              ]}>
-                {filterOptions.map((filter, index) => {
-                  const isSelected = selectedFilter === filter.toLowerCase();
-                  return (
-                    <TouchableOpacity
-                      key={filter}
-                      onPress={() => setSelectedFilter(filter.toLowerCase())}
-                      style={[
-                        styles.filterChip,
-                        isDarkMode && { backgroundColor: 'transparent' },
-                        isSelected && (isDarkMode ? styles.filterChipActiveDark : styles.filterChipActive),
-                        index < filterOptions.length - 1 && { marginBottom: 8 }
-                      ]}
-                    >
-                      <Text style={[
-                        styles.filterText,
-                        { color: theme.chipInactiveText },
-                        isSelected && { color: theme.chipActiveText }
-                      ]}>
-                        {filter}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+          {/* Filter + Stats Cards Row */}
+          <View style={styles.statsRow}>
+            {/* Filter Chips - Vertical */}
+            <View style={[
+              styles.filterContainer,
+              isDarkMode ? styles.filterContainerDark : styles.filterContainerLight,
+              { borderColor: theme.border, borderWidth: isDarkMode ? 1 : 0 }
+            ]}>
+              {filterOptions.map((filter, index) => {
+                const isSelected = selectedFilter === filter.toLowerCase();
+                return (
+                  <TouchableOpacity
+                    key={filter}
+                    onPress={() => setSelectedFilter(filter.toLowerCase())}
+                    style={[
+                      styles.filterChip,
+                      isDarkMode && { backgroundColor: 'transparent' },
+                      isSelected && (isDarkMode ? styles.filterChipActiveDark : styles.filterChipActive),
+                      index < filterOptions.length - 1 && { marginBottom: 8 }
+                    ]}
+                  >
+                    <Text style={[
+                      styles.filterText,
+                      { color: theme.chipInactiveText },
+                      isSelected && { color: theme.chipActiveText }
+                    ]}>
+                      {filter}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
-              {/* Stat Card 1: Total BD Confirmed */}
-              <View style={[
-                styles.statCard,
-                isDarkMode ? styles.statCardBlueDark : styles.statCardBlue
+            {/* Stat Card 1: Total BD Confirmed */}
+            <View style={[
+              styles.statCard,
+              isDarkMode ? styles.statCardBlueDark : styles.statCardBlue
+            ]}>
+              <Text style={[
+                styles.statLabel,
+                { color: isDarkMode ? theme.textSecondary : theme.accentStrong }
               ]}>
+                Total BD Confirmed
+              </Text>
+              <Text style={[
+                styles.statValue,
+                { color: isDarkMode ? theme.textPrimary : '#1E40AF' }
+              ]}>
+                {dashboardOverview?.total || 0}
+              </Text>
+            </View>
+
+            {/* Stat Card 2: Daily Av. BD */}
+            <View style={[
+              styles.statCard,
+              isDarkMode ? styles.statCardPrimaryDark : styles.statCardDark
+            ]}>
+              <Text style={[
+                styles.statLabel,
+                { color: isDarkMode ? theme.textSecondary : 'rgba(255,255,255,0.8)' }
+              ]}>
+                Daily Av. BD
+              </Text>
+              {dashboardOverview?.average_verified_trend && (
                 <Text style={[
-                  styles.statLabel,
-                  { color: isDarkMode ? theme.textSecondary : theme.accentStrong }
+                  styles.trendIcon,
+                  { color: isDarkMode ? theme.warning : '#FFFFFF' }
                 ]}>
-                  Total BD Confirmed
+                  {dashboardOverview.average_verified_trend === 'upward' ? '📈' :
+                    dashboardOverview.average_verified_trend === 'downward' ? '📉' : '➡️'}
                 </Text>
+              )}
+              <View style={styles.statValueRow}>
                 <Text style={[
                   styles.statValue,
-                  { color: isDarkMode ? theme.textPrimary : '#1E40AF' }
+                  { color: isDarkMode ? theme.textPrimary : '#FFFFFF' }
                 ]}>
-                  {dashboardOverview?.total || 0}
+                  {dashboardOverview?.average_verified || 0}
                 </Text>
-              </View>
-
-              {/* Stat Card 2: Daily Av. BD */}
-              <View style={[
-                styles.statCard,
-                isDarkMode ? styles.statCardPrimaryDark : styles.statCardDark
-              ]}>
-                <Text style={[
-                  styles.statLabel,
-                  { color: isDarkMode ? theme.textSecondary : 'rgba(255,255,255,0.8)' }
-                ]}>
-                  Daily Av. BD
-                </Text>
-                {dashboardOverview?.average_verified_trend && (
+                {dashboardOverview?.average_verified_percentage_delta != null && (
                   <Text style={[
-                    styles.trendIcon,
-                    { color: isDarkMode ? theme.warning : '#FFFFFF' }
+                    styles.statPercentage,
+                    { color: isDarkMode ? theme.accent : '#FFFFFF' }
                   ]}>
-                    {dashboardOverview.average_verified_trend === 'upward' ? '📈' :
-                     dashboardOverview.average_verified_trend === 'downward' ? '📉' : '➡️'}
+                    {Math.abs(dashboardOverview.average_verified_percentage_delta).toFixed(2)}%
                   </Text>
                 )}
-                <View style={styles.statValueRow}>
-                  <Text style={[
-                    styles.statValue,
-                    { color: isDarkMode ? theme.textPrimary : '#FFFFFF' }
-                  ]}>
-                    {dashboardOverview?.average_verified || 0}
-                  </Text>
-                  {dashboardOverview?.average_verified_percentage_delta != null && (
-                    <Text style={[
-                      styles.statPercentage,
-                      { color: isDarkMode ? theme.accent : '#FFFFFF' }
-                    ]}>
-                      {Math.abs(dashboardOverview.average_verified_percentage_delta).toFixed(2)}%
-                    </Text>
-                  )}
-                </View>
-              </View>
-
-              {/* Stat Card 3: Daily Av. Case List */}
-              <View style={[
-                styles.statCard,
-                isDarkMode ? styles.statCardBlueDark : styles.statCardLightBlue
-              ]}>
-                <Text style={[
-                  styles.statLabel,
-                  { color: isDarkMode ? theme.textSecondary : '#FFFFFF' }
-                ]}>
-                  Daily Av. Case List
-                </Text>
-                {dashboardOverview?.average_all_trend && (
-                  <Text style={[
-                    styles.trendIcon,
-                    { color: isDarkMode ? theme.warning : '#FFFFFF' }
-                  ]}>
-                    {dashboardOverview.average_all_trend === 'upward' ? '📈' :
-                     dashboardOverview.average_all_trend === 'downward' ? '📉' : '➡️'}
-                  </Text>
-                )}
-                <View style={styles.statValueRow}>
-                  <Text style={[
-                    styles.statValue,
-                    { color: isDarkMode ? theme.textPrimary : '#FFFFFF' }
-                  ]}>
-                    {dashboardOverview?.average_all || 0}
-                  </Text>
-                  {dashboardOverview?.average_all_percentage_delta != null && (
-                    <Text style={[
-                      styles.statPercentage,
-                      { color: isDarkMode ? theme.accent : '#FFFFFF' }
-                    ]}>
-                      {Math.abs(dashboardOverview.average_all_percentage_delta).toFixed(2)}%
-                    </Text>
-                  )}
-                </View>
-              </View>
-
-              {/* Stat Card 4: Daily Av. Block Check */}
-              <View style={[
-                styles.statCard,
-                isDarkMode ? styles.statCardPrimaryDark : styles.statCardDark
-              ]}>
-                <Text style={[
-                  styles.statLabel,
-                  { color: isDarkMode ? theme.textSecondary : 'rgba(255,255,255,0.8)' }
-                ]}>
-                  Daily Av. Block Check
-                </Text>
-                {dashboardOverview?.average_verified_block_trend && (
-                  <Text style={[
-                    styles.trendIcon,
-                    { color: isDarkMode ? theme.warning : '#FFFFFF' }
-                  ]}>
-                    {dashboardOverview.average_verified_block_trend === 'upward' ? '📈' :
-                     dashboardOverview.average_verified_block_trend === 'downward' ? '📉' : '➡️'}
-                  </Text>
-                )}
-                <View style={styles.statValueRow}>
-                  <Text style={[
-                    styles.statValue,
-                    { color: isDarkMode ? theme.textPrimary : '#FFFFFF' }
-                  ]}>
-                    {dashboardOverview?.average_verified_block || 0}
-                  </Text>
-                  {dashboardOverview?.average_verified_block_percentage_delta != null && (
-                    <Text style={[
-                      styles.statPercentage,
-                      { color: isDarkMode ? theme.accent : '#FFFFFF' }
-                    ]}>
-                      {Math.abs(dashboardOverview.average_verified_block_percentage_delta).toFixed(2)}%
-                    </Text>
-                  )}
-                </View>
               </View>
             </View>
 
-            {/* Export Button */}
+            {/* Stat Card 3: Daily Av. Case List */}
             <View style={[
-              styles.exportButtonWrapper,
-              { alignSelf: 'flex-end' }
+              styles.statCard,
+              isDarkMode ? styles.statCardBlueDark : styles.statCardLightBlue
             ]}>
-              <TouchableOpacity
-                onPress={handleExportDashboard}
-                activeOpacity={0.85}
-                disabled={exporting}
-              >
-                <LinearGradient
-                  colors={isDarkMode ? ['#1E3A8A', '#2563EB', '#0EA5E9'] : ['#00BFFF', '#1E90FF', '#0EA5E9']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={[
-                    styles.exportButtonGradient,
-                    !isDarkMode && { borderColor: 'rgba(255,255,255,0)' },
-                    exporting && styles.exportButtonDisabled
-                  ]}
-                >
-                  {exporting ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <>
-                      <Text style={styles.exportButtonIcon}>📄</Text>
-                      <Text style={styles.exportButtonText}>Export PDF</Text>
-                      <Text style={styles.exportButtonArrow}>↗</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
+              <Text style={[
+                styles.statLabel,
+                { color: isDarkMode ? theme.textSecondary : '#FFFFFF' }
+              ]}>
+                Daily Av. Case List
+              </Text>
+              {dashboardOverview?.average_all_trend && (
+                <Text style={[
+                  styles.trendIcon,
+                  { color: isDarkMode ? theme.warning : '#FFFFFF' }
+                ]}>
+                  {dashboardOverview.average_all_trend === 'upward' ? '📈' :
+                    dashboardOverview.average_all_trend === 'downward' ? '📉' : '➡️'}
+                </Text>
+              )}
+              <View style={styles.statValueRow}>
+                <Text style={[
+                  styles.statValue,
+                  { color: isDarkMode ? theme.textPrimary : '#FFFFFF' }
+                ]}>
+                  {dashboardOverview?.average_all || 0}
+                </Text>
+                {dashboardOverview?.average_all_percentage_delta != null && (
+                  <Text style={[
+                    styles.statPercentage,
+                    { color: isDarkMode ? theme.accent : '#FFFFFF' }
+                  ]}>
+                    {Math.abs(dashboardOverview.average_all_percentage_delta).toFixed(2)}%
+                  </Text>
+                )}
+              </View>
             </View>
 
-            {/* Bar Chart: Number of Bird Drops Detected */}
+            {/* Stat Card 4: Daily Av. Block Check */}
+            <View style={[
+              styles.statCard,
+              isDarkMode ? styles.statCardPrimaryDark : styles.statCardDark
+            ]}>
+              <Text style={[
+                styles.statLabel,
+                { color: isDarkMode ? theme.textSecondary : 'rgba(255,255,255,0.8)' }
+              ]}>
+                Daily Av. Block Check
+              </Text>
+              {dashboardOverview?.average_verified_block_trend && (
+                <Text style={[
+                  styles.trendIcon,
+                  { color: isDarkMode ? theme.warning : '#FFFFFF' }
+                ]}>
+                  {dashboardOverview.average_verified_block_trend === 'upward' ? '📈' :
+                    dashboardOverview.average_verified_block_trend === 'downward' ? '📉' : '➡️'}
+                </Text>
+              )}
+              <View style={styles.statValueRow}>
+                <Text style={[
+                  styles.statValue,
+                  { color: isDarkMode ? theme.textPrimary : '#FFFFFF' }
+                ]}>
+                  {dashboardOverview?.average_verified_block || 0}
+                </Text>
+                {dashboardOverview?.average_verified_block_percentage_delta != null && (
+                  <Text style={[
+                    styles.statPercentage,
+                    { color: isDarkMode ? theme.accent : '#FFFFFF' }
+                  ]}>
+                    {Math.abs(dashboardOverview.average_verified_block_percentage_delta).toFixed(2)}%
+                  </Text>
+                )}
+              </View>
+            </View>
+          </View>
+
+          {/* Export Button */}
+          <View style={[
+            styles.exportButtonWrapper,
+            { alignSelf: 'flex-end' }
+          ]}>
+            <TouchableOpacity
+              onPress={handleExportDashboard}
+              activeOpacity={0.85}
+              disabled={exporting}
+            >
+              <LinearGradient
+                colors={isDarkMode ? ['#1E3A8A', '#2563EB', '#0EA5E9'] : ['#00BFFF', '#1E90FF', '#0EA5E9']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[
+                  styles.exportButtonGradient,
+                  !isDarkMode && { borderColor: 'rgba(255,255,255,0)' },
+                  exporting && styles.exportButtonDisabled
+                ]}
+              >
+                {exporting ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Text style={styles.exportButtonIcon}>📄</Text>
+                    <Text style={styles.exportButtonText}>Export PDF</Text>
+                    <Text style={styles.exportButtonArrow}>↗</Text>
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+
+          {/* Bar Chart: Number of Bird Drops Detected */}
+          <View style={[
+            cardContainerStyle,
+            { marginBottom: 24 }
+          ]}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textPrimary, marginBottom: 16 }}>
+              Number of Bird Drops Detected (True & False)
+            </Text>
+            {dashboardBd && dashboardBd.length > 0 ? (
+              <BarChart
+                data={getBirdDropBarData()}
+                width={width - 72}
+                height={220}
+                chartConfig={chartConfig}
+                style={{ borderRadius: 8 }}
+                showValuesOnTopOfBars
+                fromZero
+              />
+            ) : (
+              <View style={{ height: 220, justifyContent: 'center', alignItems: 'center' }}>
+                <Text style={{ fontSize: 14, color: theme.textSecondary }}>No data available</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Row: Bird Drop Status + Worker */}
+          <View style={{ flexDirection: 'row', gap: 16, marginBottom: 24 }}>
+            {/* Bird Drop Status Pie Chart */}
             <View style={[
               cardContainerStyle,
-              { marginBottom: 24 }
+              { flex: 1, marginBottom: 0 }
             ]}>
               <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textPrimary, marginBottom: 16 }}>
-                Number of Bird Drops Detected (True & False)
+                Bird Drop Status
               </Text>
-              {dashboardBd && dashboardBd.length > 0 ? (
-                <BarChart
-                  data={getBirdDropBarData()}
-                  width={width - 72}
-                  height={220}
+              {getBirdDropStatusPieData().length > 0 ? (
+                <PieChart
+                  data={getBirdDropStatusPieData()}
+                  width={width / 2 - 48}
+                  height={200}
                   chartConfig={chartConfig}
-                  style={{ borderRadius: 8 }}
-                  showValuesOnTopOfBars
-                  fromZero
+                  accessor="population"
+                  backgroundColor="transparent"
+                  paddingLeft="0"
+                  absolute
                 />
               ) : (
-                <View style={{ height: 220, justifyContent: 'center', alignItems: 'center' }}>
-                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>No data available</Text>
+                <View style={{ height: 200, justifyContent: 'center', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>No data</Text>
                 </View>
               )}
             </View>
 
-            {/* Row: Bird Drop Status + Worker */}
-            <View style={{ flexDirection: 'row', gap: 16, marginBottom: 24 }}>
-              {/* Bird Drop Status Pie Chart */}
-              <View style={[
-                cardContainerStyle,
-                { flex: 1, marginBottom: 0 }
-              ]}>
-                <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textPrimary, marginBottom: 16 }}>
-                  Bird Drop Status
-                </Text>
-                {getBirdDropStatusPieData().length > 0 ? (
-                  <PieChart
-                    data={getBirdDropStatusPieData()}
-                    width={width / 2 - 48}
-                    height={200}
-                    chartConfig={chartConfig}
-                    accessor="population"
-                    backgroundColor="transparent"
-                    paddingLeft="0"
-                    absolute
-                  />
-                ) : (
-                  <View style={{ height: 200, justifyContent: 'center', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 14, color: theme.textSecondary }}>No data</Text>
-                  </View>
-                )}
-              </View>
+            {/* Worker Pie Chart */}
+            <View style={[
+              cardContainerStyle,
+              { flex: 1, marginBottom: 0 }
+            ]}>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textPrimary, marginBottom: 16 }}>
+                Worker
+              </Text>
+              {getWorkerPieData().length > 0 ? (
+                <PieChart
+                  data={getWorkerPieData()}
+                  width={width / 2 - 48}
+                  height={200}
+                  chartConfig={chartConfig}
+                  accessor="population"
+                  backgroundColor="transparent"
+                  paddingLeft="0"
+                  absolute
+                />
+              ) : (
+                <View style={{ height: 200, justifyContent: 'center', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>No data</Text>
+                </View>
+              )}
+            </View>
+          </View>
 
-              {/* Worker Pie Chart */}
-              <View style={[
-                cardContainerStyle,
-                { flex: 1, marginBottom: 0 }
-              ]}>
-                <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textPrimary, marginBottom: 16 }}>
-                  Worker
-                </Text>
-                {getWorkerPieData().length > 0 ? (
-                  <PieChart
-                    data={getWorkerPieData()}
-                    width={width / 2 - 48}
-                    height={200}
-                    chartConfig={chartConfig}
-                    accessor="population"
-                    backgroundColor="transparent"
-                    paddingLeft="0"
-                    absolute
-                  />
-                ) : (
-                  <View style={{ height: 200, justifyContent: 'center', alignItems: 'center' }}>
-                    <Text style={{ fontSize: 14, color: theme.textSecondary }}>No data</Text>
-                  </View>
-                )}
-              </View>
+          {/* Row: BD Confirmed Per Block + BD Per Block */}
+          <View style={styles.chartsRow}>
+            {/* BD Confirmed Per Block - Pie Chart */}
+            <View style={[
+              styles.chartCard,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+                borderWidth: isDarkMode ? 1 : 0,
+                shadowColor: isDarkMode ? 'transparent' : '#000',
+                shadowOpacity: isDarkMode ? 0 : 0.1,
+                elevation: isDarkMode ? 0 : 4,
+              }
+            ]}>
+              <Text style={[styles.chartTitle, { color: theme.textPrimary }]}>BD Confirm Per Block</Text>
+              {getBDConfirmPerBlockPieData().length > 0 ? (
+                <PieChart
+                  data={getBDConfirmPerBlockPieData()}
+                  width={width / 2 - 48}
+                  height={200}
+                  chartConfig={chartConfig}
+                  accessor="population"
+                  backgroundColor="transparent"
+                  paddingLeft="0"
+                  absolute
+                />
+              ) : (
+                <View style={styles.emptyChart}>
+                  <Text style={[styles.emptyText, { color: theme.textSecondary }]}>No data</Text>
+                </View>
+              )}
             </View>
 
-            {/* Row: BD Confirmed Per Block + BD Per Block */}
-            <View style={styles.chartsRow}>
-              {/* BD Confirmed Per Block - Pie Chart */}
-              <View style={[
-                styles.chartCard,
-                {
-                  backgroundColor: theme.surface,
-                  borderColor: theme.border,
-                  borderWidth: isDarkMode ? 1 : 0,
-                  shadowColor: isDarkMode ? 'transparent' : '#000',
-                  shadowOpacity: isDarkMode ? 0 : 0.1,
-                  elevation: isDarkMode ? 0 : 4,
-                }
-              ]}>
-                <Text style={[styles.chartTitle, { color: theme.textPrimary }]}>BD Confirm Per Block</Text>
-                {getBDConfirmPerBlockPieData().length > 0 ? (
-                  <PieChart
-                    data={getBDConfirmPerBlockPieData()}
-                    width={width / 2 - 48}
-                    height={200}
-                    chartConfig={chartConfig}
-                    accessor="population"
-                    backgroundColor="transparent"
-                    paddingLeft="0"
-                    absolute
-                  />
-                ) : (
-                  <View style={styles.emptyChart}>
-                    <Text style={[styles.emptyText, { color: theme.textSecondary }]}>No data</Text>
+            {/* BD Per Block - Table */}
+            <View style={[
+              styles.chartCard,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+                borderWidth: isDarkMode ? 1 : 0,
+                shadowColor: isDarkMode ? 'transparent' : '#000',
+                shadowOpacity: isDarkMode ? 0 : 0.1,
+                elevation: isDarkMode ? 0 : 4,
+              }
+            ]}>
+              <Text style={[styles.chartTitle, { color: theme.textPrimary }]}>Bird Drop Per Block</Text>
+              {dashboardBdPerBlock && dashboardBdPerBlock.length > 0 ? (
+                <View style={styles.tableContainer}>
+                  {/* Header Row */}
+                  <View style={[styles.tableHeader, { borderColor: theme.border }]}>
+                    <Text style={[styles.tableHeaderText, { flex: 1, color: theme.textPrimary }]}>Block</Text>
+                    <Text style={[styles.tableHeaderText, { flex: 1, textAlign: 'center', color: theme.textPrimary }]}>Total{'\n'}Case List</Text>
+                    <Text style={[styles.tableHeaderText, { flex: 1, textAlign: 'center', color: theme.textPrimary }]}>Confirm</Text>
+                    <Text style={[styles.tableHeaderText, { flex: 1, textAlign: 'center', color: theme.textPrimary }]}>False{'\n'}Detection</Text>
                   </View>
-                )}
-              </View>
-
-              {/* BD Per Block - Table */}
-              <View style={[
-                styles.chartCard,
-                {
-                  backgroundColor: theme.surface,
-                  borderColor: theme.border,
-                  borderWidth: isDarkMode ? 1 : 0,
-                  shadowColor: isDarkMode ? 'transparent' : '#000',
-                  shadowOpacity: isDarkMode ? 0 : 0.1,
-                  elevation: isDarkMode ? 0 : 4,
-                }
-              ]}>
-                <Text style={[styles.chartTitle, { color: theme.textPrimary }]}>Bird Drop Per Block</Text>
-                {dashboardBdPerBlock && dashboardBdPerBlock.length > 0 ? (
-                  <View style={styles.tableContainer}>
-                    {/* Header Row */}
-                    <View style={[styles.tableHeader, { borderColor: theme.border }]}>
-                      <Text style={[styles.tableHeaderText, { flex: 1, color: theme.textPrimary }]}>Block</Text>
-                      <Text style={[styles.tableHeaderText, { flex: 1, textAlign: 'center', color: theme.textPrimary }]}>Total{'\n'}Case List</Text>
-                      <Text style={[styles.tableHeaderText, { flex: 1, textAlign: 'center', color: theme.textPrimary }]}>Confirm</Text>
-                      <Text style={[styles.tableHeaderText, { flex: 1, textAlign: 'center', color: theme.textPrimary }]}>False{'\n'}Detection</Text>
-                    </View>
-                    <View style={[styles.tableDivider, { backgroundColor: theme.border }]} />
-                    {/* Data Rows */}
-                    <ScrollView
-                      style={styles.tableScroll}
-                      contentContainerStyle={styles.tableScrollContent}
-                      nestedScrollEnabled
-                      showsVerticalScrollIndicator={false}
-                    >
-                      {dashboardBdPerBlock.map((item, index) => {
-                        const lightColors = ['#F3E8FF', '#E8FFF3', '#E8F1FF', '#FFF7E8'];
-                        const darkColors = ['rgba(59,130,246,0.18)', 'rgba(16,185,129,0.18)', 'rgba(125,211,252,0.18)', 'rgba(249,115,22,0.18)'];
-                        const palette = isDarkMode ? darkColors : lightColors;
-                        const baseColor = palette[index % palette.length];
-                        const rowBackground = isDarkMode ? baseColor : baseColor + '66';
-                        return (
-                          <View
-                            key={index}
-                            style={[
-                              styles.tableRow,
-                              {
-                                backgroundColor: rowBackground,
-                                borderColor: isDarkMode ? theme.border : 'transparent',
-                                borderWidth: isDarkMode ? 1 : 0
-                              }
-                            ]}
-                          >
-                            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-                              <Text style={{ marginRight: 6 }}>📍</Text>
-                              <Text style={[styles.tableCell, { color: theme.textPrimary }]}>BLK {item.area_code}</Text>
-                            </View>
-                            <Text style={[styles.tableCell, { flex: 1, textAlign: 'center', color: theme.textPrimary }]}>
-                              {item.total}
-                            </Text>
-                            <Text style={[styles.tableCell, { flex: 1, textAlign: 'center', color: theme.textPrimary }]}>
-                              {item.true_detection}
-                            </Text>
-                            <View style={{ flex: 1, alignItems: 'center' }}>
-                              <View style={[styles.tableBadge, { backgroundColor: baseColor }]}>
-                                <Text style={[styles.tableBadgeText, { color: theme.textPrimary }]}>{item.false_detection}</Text>
-                              </View>
+                  <View style={[styles.tableDivider, { backgroundColor: theme.border }]} />
+                  {/* Data Rows */}
+                  <ScrollView
+                    style={styles.tableScroll}
+                    contentContainerStyle={styles.tableScrollContent}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator={false}
+                  >
+                    {dashboardBdPerBlock.map((item, index) => {
+                      const lightColors = ['#F3E8FF', '#E8FFF3', '#E8F1FF', '#FFF7E8'];
+                      const darkColors = ['rgba(59,130,246,0.18)', 'rgba(16,185,129,0.18)', 'rgba(125,211,252,0.18)', 'rgba(249,115,22,0.18)'];
+                      const palette = isDarkMode ? darkColors : lightColors;
+                      const baseColor = palette[index % palette.length];
+                      const rowBackground = isDarkMode ? baseColor : baseColor + '66';
+                      return (
+                        <View
+                          key={index}
+                          style={[
+                            styles.tableRow,
+                            {
+                              backgroundColor: rowBackground,
+                              borderColor: isDarkMode ? theme.border : 'transparent',
+                              borderWidth: isDarkMode ? 1 : 0
+                            }
+                          ]}
+                        >
+                          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={{ marginRight: 6 }}>📍</Text>
+                            <Text style={[styles.tableCell, { color: theme.textPrimary }]}>BLK {item.area_code}</Text>
+                          </View>
+                          <Text style={[styles.tableCell, { flex: 1, textAlign: 'center', color: theme.textPrimary }]}>
+                            {item.total}
+                          </Text>
+                          <Text style={[styles.tableCell, { flex: 1, textAlign: 'center', color: theme.textPrimary }]}>
+                            {item.true_detection}
+                          </Text>
+                          <View style={{ flex: 1, alignItems: 'center' }}>
+                            <View style={[styles.tableBadge, { backgroundColor: baseColor }]}>
+                              <Text style={[styles.tableBadgeText, { color: theme.textPrimary }]}>{item.false_detection}</Text>
                             </View>
                           </View>
-                        );
-                      })}
-                    </ScrollView>
-                  </View>
-                ) : (
-                  <View style={styles.emptyChart}>
-                    <Text style={[styles.emptyText, { color: theme.textSecondary }]}>No data</Text>
-                  </View>
-                )}
-              </View>
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              ) : (
+                <View style={styles.emptyChart}>
+                  <Text style={[styles.emptyText, { color: theme.textSecondary }]}>No data</Text>
+                </View>
+              )}
             </View>
-          </>
-        )}
-      </ScrollView>
+          </View>
+        </>
+      )}
+    </ScrollView>
   );
 }
 

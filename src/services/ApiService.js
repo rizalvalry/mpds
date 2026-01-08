@@ -113,8 +113,8 @@ export class ApiService {
         const lowerText = responseText.toLowerCase();
         const looksLikeHtml = responseText.includes('<html') || responseText.includes('<!DOCTYPE');
         const hintsSessionMessage = (lowerText.includes('invalid') && lowerText.includes('session')) ||
-                                     (lowerText.includes('expired') && lowerText.includes('session')) ||
-                                     lowerText.includes('unauthorized');
+          (lowerText.includes('expired') && lowerText.includes('session')) ||
+          lowerText.includes('unauthorized');
 
         // Generate user-friendly error message based on status code
         let userMessage = 'Invalid response from server';
@@ -366,7 +366,7 @@ export class ApiService {
 
   async bulkUpdateCases(workerId, areaCode, statusId) {
     const url = this.buildUrl(this.endpoints.bulkUpdate);
-    
+
     // Backend only supports single areaCode - do NOT join multiple codes
     // If array is passed, only use first element (caller should loop for multiple)
     const singleAreaCode = Array.isArray(areaCode) ? areaCode[0] : areaCode;
@@ -576,18 +576,39 @@ export class ApiService {
     return this.fetchData({ method: 'GET', url });
   }
 
-  async getDashboardBDPerBlock(type) {
+  async getDashboardBDPerBlock(type, areaCodes = null) {
     await this.init(); // Ensure tokens are loaded
-    const url = this.buildUrl(this.endpoints.dashboardBDPerBlock, { type });
+    const params = { type };
+    // Add areaCodes filter if provided (comma-separated string)
+    if (areaCodes && Array.isArray(areaCodes) && areaCodes.length > 0) {
+      params.areaCodes = areaCodes.join(',');
+    }
+    const url = this.buildUrl(this.endpoints.dashboardBDPerBlock, params);
+    console.log('[ApiService] 📊 getDashboardBDPerBlock URL:', url);
+    console.log('[ApiService] 📊 areaCodes filter:', params.areaCodes || 'NONE');
     return this.fetchData({ method: 'GET', url });
   }
 
-  async exportDashboard(type) {
+  async exportDashboard(type, areaCodes = null, pilotName = null) {
     const url = this.buildUrl(this.endpoints.exportDashboard);
+    const body = { type };
+
+    // Add areaCodes filter for pilot-specific export
+    if (areaCodes && Array.isArray(areaCodes) && areaCodes.length > 0) {
+      body.AreaCodes = areaCodes;
+    }
+
+    // Add pilot name for PDF title
+    if (pilotName) {
+      body.PilotName = pilotName;
+    }
+
+    console.log('[ApiService] 📄 exportDashboard body:', body);
+
     return this.fetchData({
       method: 'POST',
       url,
-      body: { type },
+      body,
     });
   }
 
