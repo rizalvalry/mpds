@@ -578,14 +578,19 @@ export class ApiService {
 
   async getDashboardBDPerBlock(type, areaCodes = null) {
     await this.init(); // Ensure tokens are loaded
-    const params = { type };
-    // Add areaCodes filter if provided (comma-separated string)
+
+    // Manual URL construction to handle List<string> query params correctly
+    // ASP.NET Core expects ?areaCodes=A&areaCodes=B for List<string> binding
+    let url = `${this.endpoints.dashboardBDPerBlock}?type=${type}`;
+
+    // Add areaCodes filter
     if (areaCodes && Array.isArray(areaCodes) && areaCodes.length > 0) {
-      params.areaCodes = areaCodes.join(',');
+      areaCodes.forEach(code => {
+        url += `&areaCodes=${encodeURIComponent(code)}`;
+      });
     }
-    const url = this.buildUrl(this.endpoints.dashboardBDPerBlock, params);
+
     console.log('[ApiService] 📊 getDashboardBDPerBlock URL:', url);
-    console.log('[ApiService] 📊 areaCodes filter:', params.areaCodes || 'NONE');
     return this.fetchData({ method: 'GET', url });
   }
 
