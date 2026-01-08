@@ -154,63 +154,90 @@ class MonitoringDataService {
         area_handle: latestSession.area_handle,
         finalAreaCodes: finalAreaCodes,
       });
-      let totalProcessed = 0;
+
+      // CRITICAL: Build area breakdown from upload_details API (end_uploads field)
+      // This is the SINGLE SOURCE OF TRUTH for all devices
       const areaBreakdown = {};
+      let totalProcessed = 0;
 
-      if (localSession && localSession.batches && localSession.batches.length > 0) {
-        // Count processed from Pusher events stored in AsyncStorage
-        localSession.batches.forEach(batch => {
-          if (batch.byArea) {
-            Object.entries(batch.byArea).forEach(([area, count]) => {
-              if (!areaBreakdown[area]) {
-                areaBreakdown[area] = 0;
-              }
-              areaBreakdown[area] += count;
-              totalProcessed += count;
-            });
-          }
-        });
-      }
+      // Process each upload session to get end_uploads per area
+      apiData.forEach(session => {
+        if (session.area_handle && Array.isArray(session.area_handle)) {
+          session.area_handle.forEach(area => {
+            const endUploads = session.end_uploads || 0;
 
-      console.log('[MonitoringDataService] Processed from AsyncStorage (Pusher events):', {
-        totalProcessed,
-        areaBreakdown,
+            // Check if upload is stale (60+ minutes old) → auto-complete to 100%
+            const createdAt = new Date(session.created_at);
+            const now = new Date();
+            const minutesDiff = (now - createdAt) / (1000 * 60); // Convert ms to minutes
+
+            if (minutesDiff >= 60 && endUploads < session.start_uploads) {
+              // AUTO-COMPLETE: Force end_uploads = start_uploads after 60 minutes
+              console.log(`[MonitoringDataService] ⏰ AUTO-COMPLETE: Block ${area} (${session.id}) is ${minutesDiff.toFixed(0)} min old, marking as 100%`);
+              areaBreakdown[area] = (areaBreakdown[area] || 0) + session.start_uploads;
+              totalProcessed += session.start_uploads;
+            } else {
+              // Normal case: use end_uploads from API
+              areaBreakdown[area] = (areaBreakdown[area] || 0) + endUploads;
+              totalProcessed += endUploads;
+            }
+          });
+        }
       });
 
-      // Use total start_uploads as the denominator for ALL areas
-      // This means each area shows: processed_in_area / total_start_uploads
-      // Example: If 695 files uploaded across C,D,K, then:
-      //   - Block C: 1/695
-      //   - Block D: 64/695
-      //   - Block K: 233/695
+      console.log('[MonitoringDataService] Processed from upload_details API (end_uploads):', {
+        totalProcessed,
+        areaBreakdown,
+        totalUploaded,
+      });
 
       const inProgress = [];
       const completed = [];
 
-      finalAreaCodes.forEach((areaCode) => {
-        const processedInArea = areaBreakdown[areaCode] || 0; // From Pusher events (detected + undetected)
+      // Build panels per area based on their own progress
+      apiData.forEach((session) => {
+        if (!session.area_handle || !Array.isArray(session.area_handle)) return;
 
-        // Progress calculation: (processed_in_area / total_start_uploads) * 100%
-        const progress = totalUploaded > 0 ? (processedInArea / totalUploaded) * 100 : 0;
+        session.area_handle.forEach((areaCode) => {
+          const startUploads = session.start_uploads || 0;
+          const endUploads = session.end_uploads || 0;
 
-        const areaData = {
-          areaCode,
-          processed: processedInArea,        // Processed files in this area (from Pusher)
-          total: totalUploaded,              // TOTAL start_uploads for ALL areas
-          progress: Math.min(Math.round(progress), 100),
-        };
+          // Check if auto-complete needed (60+ minutes old)
+          const createdAt = new Date(session.created_at);
+          const now = new Date();
+          const minutesDiff = (now - createdAt) / (1000 * 60); // Convert ms to minutes
 
-        // Only show areas that have processed files OR are in area_handle from API
-        const areaInAPI = allAreasFromAPI.has(areaCode);
+          let processed = endUploads;
+          let isAutoCompleted = false;
 
-        if (areaInAPI || processedInArea > 0) {
-          // If processed equals total uploaded, move to completed panel
-          if (processedInArea >= totalUploaded) {
+          if (minutesDiff >= 60 && endUploads < startUploads) {
+            // Force complete after 60 minutes
+            processed = startUploads;
+            isAutoCompleted = true;
+          }
+
+          // Calculate progress for THIS area only
+          const progress = startUploads > 0 ? Math.round((processed / startUploads) * 100) : 0;
+
+          const areaData = {
+            areaCode,
+            processed,
+            total: startUploads,
+            progress: Math.min(progress, 100),
+            sessionId: session.id,
+            operator: session.operator,
+            createdAt: session.created_at,
+            minutesOld: minutesDiff.toFixed(0),  // Changed from hoursOld to minutesOld
+            autoCompleted: isAutoCompleted,
+          };
+
+          // Move to completed if 100%
+          if (progress >= 100 || processed >= startUploads) {
             completed.push(areaData);
           } else {
             inProgress.push(areaData);
           }
-        }
+        });
       });
 
       console.log('[MonitoringDataService] Panels calculated:', {

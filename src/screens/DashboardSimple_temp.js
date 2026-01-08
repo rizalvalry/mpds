@@ -16,7 +16,6 @@ import { BlurView } from 'expo-blur';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { useTheme } from '../contexts/ThemeContext';
 import apiService from '../services/ApiService';
-import UploadScreen from './UploadScreen';
 import CasesScreen from './CasesScreen';
 import MonitoringScreen from './MonitoringScreen';
 import UploadMockup from './UploadMockup';

@@ -13,9 +13,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../contexts/ThemeContext';
 import { getMonitoringPanelsData, getTodayStatistics } from '../utils/uploadSessionStorage';
 import pusherService from '../services/PusherService'; // RE-ENABLED for real-time updates
+import pusherProgressService from '../services/PusherProgressService'; // NEW: For API sync
 import monitoringDataService from '../services/MonitoringDataService';
 import apiService from '../services/ApiService';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// AsyncStorage removed - all data comes from real API only
 
 const { width } = Dimensions.get('window');
 
@@ -39,6 +40,10 @@ export default function MonitoringMockup({
   const [countdown, setCountdown] = useState(300); // 5 minutes = 300 seconds
   const { theme } = useTheme();
 
+  // Real-time progress from Pusher (block-progress channel)
+  // Format: { 'A': { detected: 50, undetected: 30, total_processed: 80 }, 'B': {...} }
+  const [pusherProgress, setPusherProgress] = useState({});
+
   // Pusher health monitoring
   const [pusherStatus, setPusherStatus] = useState('connecting'); // 'connected', 'disconnected', 'degraded'
   const [lastPusherEvent, setLastPusherEvent] = useState(Date.now());
@@ -52,31 +57,11 @@ export default function MonitoringMockup({
 
   // Polling intervals
   const NORMAL_POLLING = 5 * 60 * 1000;    // 5 minutes
-  const AGGRESSIVE_POLLING = 1 * 60 * 1000; // 1 minute
+  const AGGRESSIVE_POLLING = 2 * 60 * 1000; // 2 minutes (fallback when Pusher degraded)
   const PUSHER_SILENCE_THRESHOLD = 3 * 60 * 1000; // 3 minutes without events
 
-  // Initialize countdown from global shared storage (persistent across all devices)
-  useEffect(() => {
-    const initCountdown = async () => {
-      try {
-        // Fetch current server time from API to sync countdown
-        const response = await apiService.getDashboardBDPerBlock('today');
-        // Use countdown based on last fetch, not device time
-        // This ensures all devices show similar countdown
-        const savedCountdown = await AsyncStorage.getItem('monitoring_countdown_value');
-        if (savedCountdown) {
-          const savedValue = parseInt(savedCountdown, 10);
-          // Only use saved value if it's reasonable (0-300)
-          if (savedValue >= 0 && savedValue <= 300) {
-            setCountdown(savedValue);
-          }
-        }
-      } catch (error) {
-        console.error('[MonitoringMockup] Error loading countdown:', error);
-      }
-    };
-    initCountdown();
-  }, []);
+  // Countdown is managed purely by React state - no AsyncStorage
+  // All data comes from real API only
 
   // Function to start/stop polling based on Pusher health
   const managePolling = useCallback((shouldPoll) => {
@@ -87,19 +72,17 @@ export default function MonitoringMockup({
     }
 
     if (shouldPoll) {
-      // Start aggressive polling (1 minute) when Pusher is degraded/offline
-      console.log('[MonitoringMockup] 🔄 Starting aggressive polling (1 min)');
+      // Start aggressive polling (2 minutes) when Pusher is degraded/offline
+      console.log('[MonitoringMockup] 🔄 Starting aggressive polling (2 min)');
 
       pollingIntervalRef.current = setInterval(() => {
         console.log('[MonitoringMockup] 🔄 Polling: Fetching data from API...');
         loadData(false);
-        setCountdown(60); // Reset to 1 minute
-        AsyncStorage.setItem('monitoring_countdown_value', '60');
+        setCountdown(120); // Reset to 2 minutes
       }, AGGRESSIVE_POLLING);
 
       // Set initial countdown
-      setCountdown(60);
-      AsyncStorage.setItem('monitoring_countdown_value', '60');
+      setCountdown(120);
       setPollingMode('aggressive');
     } else {
       // Stop polling - pure real-time mode
@@ -109,7 +92,7 @@ export default function MonitoringMockup({
     }
   }, [AGGRESSIVE_POLLING, loadData]);
 
-  // Setup initial data load and countdown timer
+  // Setup initial data load and 5-minute polling (PRIMARY mechanism)
   useEffect(() => {
     console.log('[MonitoringMockup] Component mounted, loading initial data...');
     isMountedRef.current = true;
@@ -117,25 +100,37 @@ export default function MonitoringMockup({
     // Initial load
     loadData();
 
-    // DON'T start polling - wait for Pusher health check to determine if needed
-    console.log('[MonitoringMockup] Starting in pure real-time mode (no polling)');
+    // START PusherProgressService for cross-device sync (real-time updates)
+    if (session) {
+      console.log('[MonitoringMockup] 🚀 Starting PusherProgressService...');
+      pusherProgressService.start(session);
+    }
 
-    // Setup countdown timer (only runs when in aggressive polling mode)
+    // START 5-minute polling as PRIMARY mechanism
+    // This ensures database values (end_uploads, end_detections) are regularly updated
+    console.log('[MonitoringMockup] 📊 Starting 5-minute polling as PRIMARY mechanism');
+    pollingIntervalRef.current = setInterval(() => {
+      console.log('[MonitoringMockup] 🔄 5-min polling: Fetching data from API...');
+      loadData(false);
+      setCountdown(300); // Reset to 5 minutes
+    }, NORMAL_POLLING);
+    setCountdown(300); // Initial countdown
+    setPollingMode('normal');
+
+    // Setup countdown timer (always runs for 5-min polling)
     countdownIntervalRef.current = setInterval(() => {
       setCountdown((prev) => {
-        // Only decrement if in aggressive mode (degraded/disconnected)
-        if (pollingMode === 'aggressive') {
-          const newValue = prev > 0 ? prev - 1 : 60;
-          AsyncStorage.setItem('monitoring_countdown_value', newValue.toString());
-          return newValue;
-        }
-        return 0; // No countdown in real-time mode
+        const newValue = prev > 0 ? prev - 1 : 300;
+        return newValue;
       });
     }, 1000);
 
     return () => {
       console.log('[MonitoringMockup] Component unmounting, cleaning up...');
       isMountedRef.current = false;
+
+      // Stop PusherProgressService
+      pusherProgressService.stop();
 
       // Clear intervals
       if (pollingIntervalRef.current) {
@@ -148,14 +143,14 @@ export default function MonitoringMockup({
         clearInterval(pusherHealthCheckRef.current);
       }
     };
-  }, [loadData, pollingMode]);
+  }, [loadData, session, NORMAL_POLLING]);
 
   // RE-ENABLED: Pusher/WebSocket connection for real-time updates
   useEffect(() => {
     console.log('[MonitoringMockup] Setting up Pusher connection...');
 
     const handleFileDetected = (data) => {
-      console.log('[MonitoringMockup] 📡 Pusher event received:', data);
+      console.log('[MonitoringMockup] 📡 file-detected event received:', data);
 
       // Update last event timestamp
       setLastPusherEvent(Date.now());
@@ -171,7 +166,48 @@ export default function MonitoringMockup({
       loadData(false);
     };
 
-    pusherService.connect(handleFileDetected);
+    const handleBlockProgress = (data) => {
+      console.log('[MonitoringMockup] 📊 block-progress event received:', data);
+
+      // Update last event timestamp
+      setLastPusherEvent(Date.now());
+      setPusherStatus('connected');
+
+      // Stop polling if we're in aggressive mode - back to pure real-time
+      if (pollingMode === 'aggressive') {
+        console.log('[MonitoringMockup] ✅ Pusher recovered, stopping polling');
+        managePolling(false); // Stop polling, go back to real-time
+      }
+
+      // Update progress state with real-time data from backend worker
+      const areaCode = data.area_code;
+      const detectedCount = data.detected_count || 0;
+      const undetectedCount = data.undetected_count || 0;
+      const totalProcessed = data.total_processed || 0;
+
+      if (areaCode) {
+        // SET progress (not increment) - this avoids lost events issue
+        setPusherProgress((prev) => ({
+          ...prev,
+          [areaCode]: {
+            detected: detectedCount,
+            undetected: undetectedCount,
+            total_processed: totalProcessed,
+          },
+        }));
+
+        console.log(`[MonitoringMockup] Updated progress for Block ${areaCode}:`, {
+          detected: detectedCount,
+          undetected: undetectedCount,
+          total_processed: totalProcessed,
+        });
+
+        // Trigger data reload to recalculate panels
+        loadData(false);
+      }
+    };
+
+    pusherService.connect(handleFileDetected, handleBlockProgress);
 
     return () => {
       console.log('[MonitoringMockup] Disconnecting Pusher...');
@@ -199,7 +235,7 @@ export default function MonitoringMockup({
         console.warn('[MonitoringMockup] ⚠️ Pusher disconnected, starting polling');
         setPusherStatus('disconnected');
         if (pollingMode !== 'aggressive') {
-          managePolling(true); // Start 1min polling
+          managePolling(true); // Start 2min polling
         }
         return;
       }
@@ -209,7 +245,7 @@ export default function MonitoringMockup({
         console.warn(`[MonitoringMockup] ⚠️ Pusher silent for ${Math.round(timeSinceLastEvent / 1000)}s, assuming degraded/limited`);
         setPusherStatus('degraded');
         if (pollingMode !== 'aggressive') {
-          managePolling(true); // Start 1min polling
+          managePolling(true); // Start 2min polling
         }
         return;
       }
@@ -264,72 +300,156 @@ export default function MonitoringMockup({
         return;
       }
 
-      // Calculate metrics from bird_drops_by_block
-      // LOGIC EXPLANATION:
-      // - totalProcessed = SUM of all blocks (C=27, D=37, E=35, F=51, K=24, L=27) = 201
-      // - totalUploaded = from UploadDetails = 2764
-      // - Overall Progress = (201 / 2764) * 100% = 7%
-      // - Block progress = (blockValue / totalProcessed) * 100%
-      //   Example: Block C = (27 / 201) * 100% = 13%
-      // - When totalProcessed >= totalUploaded → All blocks move to COMPLETED
+      // NEW CORRECT LOGIC:
+      // 1. Group UploadDetails by area_code + phase
+      // 2. Match with bird_drops_by_block detection count
+      // 3. Calculate progress per phase: (detected / start_uploads) * 100%
+      // 4. Separate phases for same area (e.g., Block C phase 0 & phase 1)
 
-      let totalProcessed = 0; // Sum of all "Total Case List" from bird_drops_by_block
-      const blocksData = []; // Temporary storage for block data
+      const uploadSessions = {}; // Key: "area_code-phase", Value: {start_uploads, phase, operator}
+      let totalUploaded = 0;
 
-      if (birdDropsResponse.success && birdDropsResponse.data) {
-        birdDropsResponse.data.forEach((block) => {
-          // block.total is "Total Case List" - the number that grows as detection runs
-          const blockValue = block.total || 0;
+      // Get user's area_code list from login session for filtering
+      const userAreaCodes = session?.area_code || [];
+      console.log('[MonitoringMockup] 🔐 User area_codes from session:', userAreaCodes);
 
-          totalProcessed += blockValue;
+      if (uploadDetailsResponse.success && uploadDetailsResponse.data) {
+        uploadDetailsResponse.data.forEach((uploadSession) => {
+          const areaHandle = uploadSession.area_handle; // Single string "C" from compatibility layer
+          const phase = uploadSession.phase || 0;
+          const key = `${areaHandle}-${phase}`;
+          const createdAt = uploadSession.created_at ? new Date(uploadSession.created_at) : null;
 
-          // Store block data
-          if (blockValue > 0) {
-            blocksData.push({
-              areaCode: block.area_code,
-              value: blockValue,
-            });
+          // FILTER: Only show blocks that belong to user's area_code
+          // If userAreaCodes is empty, show all (admin view)
+          if (userAreaCodes.length > 0 && !userAreaCodes.includes(areaHandle)) {
+            console.log(`[MonitoringMockup] ⏭️ Skipping Block ${areaHandle} - not in user's area_codes`);
+            return; // Skip this session
+          }
+
+          // Store session data grouped by area_code + phase
+          if (!uploadSessions[key]) {
+            uploadSessions[key] = {
+              areaCode: areaHandle,
+              phase: phase,
+              startUploads: 0,
+              operator: uploadSession.operator,
+              sessionId: uploadSession.id,
+              createdAt: createdAt, // Track upload start time
+            };
+          }
+
+          uploadSessions[key].startUploads += (uploadSession.start_uploads || 0);
+          totalUploaded += (uploadSession.start_uploads || 0);
+
+          // Track oldest created_at for this area-phase combination
+          if (createdAt && (!uploadSessions[key].createdAt || createdAt < uploadSessions[key].createdAt)) {
+            uploadSessions[key].createdAt = createdAt;
           }
         });
       }
 
-      // Calculate total uploaded from UploadDetails
-      let totalUploaded = 0;
-      if (uploadDetailsResponse.success && uploadDetailsResponse.data) {
-        uploadDetailsResponse.data.forEach((session) => {
-          totalUploaded += session.start_uploads || 0;
+      console.log(`[MonitoringMockup] 📊 Filtered to ${Object.keys(uploadSessions).length} block sessions for user`);
+
+      console.log('[MonitoringMockup] 📊 Upload Sessions Grouped:', uploadSessions);
+
+      // HYBRID APPROACH: Use Pusher real-time progress if available, fallback to API
+      // Pusher progress_tracker.py provides real-time detected/undetected counts
+      // bird_drops_by_block API provides fallback if Pusher is not available
+      const detectionCounts = {}; // Key: area_code, Value: { detected, undetected, total_processed }
+      let totalProcessed = 0;
+
+      // First, try to get real-time data from Pusher
+      Object.keys(pusherProgress).forEach((areaCode) => {
+        const pusherData = pusherProgress[areaCode];
+        detectionCounts[areaCode] = {
+          detected: pusherData.detected || 0,
+          undetected: pusherData.undetected || 0,
+          total_processed: pusherData.total_processed || 0,
+        };
+        totalProcessed += (pusherData.total_processed || 0);
+      });
+
+      // Fallback: If no Pusher data for an area, use bird_drops_by_block API
+      if (birdDropsResponse.success && birdDropsResponse.data) {
+        birdDropsResponse.data.forEach((block) => {
+          const areaCode = block.area_code;
+          const apiDetected = block.total || 0;
+
+          // Only use API data if we don't have Pusher data for this area
+          if (!detectionCounts[areaCode]) {
+            detectionCounts[areaCode] = {
+              detected: apiDetected,
+              undetected: 0, // API doesn't provide undetected count
+              total_processed: apiDetected,
+            };
+            totalProcessed += apiDetected;
+          }
         });
       }
 
-      // Now calculate progress for each block
-      // Block progress shows: "this block represents X% of total work done"
+      console.log('[MonitoringMockup] 🎯 Detection Counts (Pusher + API fallback):', detectionCounts);
+
+      // Now calculate progress for each upload session (per area_code + phase)
       const completed = [];
       const inProgress = [];
+      const now = new Date();
 
-      blocksData.forEach((block) => {
-        // Block progress = (blockValue / totalProcessed) * 100%
-        // This shows the block's contribution to the total detection work
-        const blockProgress = totalProcessed > 0
-          ? Math.round((block.value / totalProcessed) * 100)
+      Object.keys(uploadSessions).forEach((key) => {
+        const session = uploadSessions[key];
+        const areaCode = session.areaCode;
+        const phase = session.phase;
+        const startUploads = session.startUploads;
+        const createdAt = session.createdAt;
+
+        // Get detection count for this area_code
+        const areaProgress = detectionCounts[areaCode] || { detected: 0, undetected: 0, total_processed: 0 };
+        const detected = areaProgress.detected || 0;
+        const undetected = areaProgress.undetected || 0;
+        let processed = areaProgress.total_processed || 0;
+
+        // REMOVED: 60-minute auto-complete logic
+        // Now relying on 5-minute polling to get accurate data from API
+        // Backend.worker will update detection timestamps directly via API
+
+        // Calculate progress: (detected + undetected) / startUploads * 100%
+        // This matches the formula user requested: (detected + undetected) / total
+        const progress = startUploads > 0
+          ? Math.round((processed / startUploads) * 100)
           : 0;
 
+        // Clamp progress to max 100%
+        const clampedProgress = Math.min(progress, 100);
+
         const blockData = {
-          areaCode: block.areaCode,
-          processed: block.value,
-          total: totalProcessed, // Show as "X / totalProcessed"
-          progress: blockProgress,
+          areaCode: areaCode,
+          phase: phase,
+          processed: processed, // detected + undetected from API
+          detectedCount: detected,
+          undetectedCount: undetected,
+          total: startUploads, // Show as "processed / startUploads"
+          progress: clampedProgress,
+          operator: session.operator,
+          sessionId: session.sessionId,
+          queued: Math.max(0, startUploads - processed), // Calculate queued items
         };
 
-        // All blocks stay in "IN PROGRESS" until totalProcessed >= totalUploaded
-        // Individual blocks don't complete separately
-        inProgress.push(blockData);
+        // Determine if completed or in progress
+        if (processed >= startUploads) {
+          // 100% complete (either naturally or auto-completed after 60 min)
+          completed.push(blockData);
+        } else {
+          // Still in progress
+          inProgress.push(blockData);
+        }
       });
 
-      // If totalProcessed >= totalUploaded, move ALL blocks to COMPLETED
-      if (totalProcessed >= totalUploaded && totalUploaded > 0) {
-        completed.push(...inProgress);
-        inProgress.length = 0; // Clear in progress
-      }
+      console.log('[MonitoringMockup] ✅ Calculated Progress:', {
+        inProgress: inProgress.length,
+        completed: completed.length,
+        totalUploaded,
+        totalProcessed,
+      });
 
       // Final safety check before setState
       if (!isMountedRef.current) {
@@ -367,14 +487,13 @@ export default function MonitoringMockup({
         setRefreshing(false);
       }
     }
-  }, []); // Empty deps - loadData doesn't depend on any props or state
+  }, [pusherProgress]); // Depend on pusherProgress for real-time updates
 
   // Handle pull-to-refresh
   const onRefresh = async () => {
     console.log('[MonitoringMockup] 🔄 Manual refresh triggered');
     setRefreshing(true);
     setCountdown(300); // Reset countdown when manually refreshing
-    await AsyncStorage.setItem('monitoring_countdown_value', '300');
 
     await loadData(false);
     console.log('[MonitoringMockup] ✅ Manual refresh completed');
@@ -461,18 +580,13 @@ export default function MonitoringMockup({
                 <Text style={styles.summaryLabelLarge}>UPLOADED - Today</Text>
               </View>
             </View>
-            {/* Only show countdown when NOT in real-time mode (Pusher degraded/offline) */}
-            {(pusherStatus === 'degraded' || pusherStatus === 'disconnected') && (
-              <View style={styles.countdownContainer}>
-                <Text style={styles.countdownLabel}>⚠️ Fallback polling in</Text>
-                <Text style={styles.countdownTimer}>{formatCountdown()}</Text>
-              </View>
-            )}
-            {pusherStatus === 'connected' && (
-              <View style={styles.countdownContainer}>
-                <Text style={styles.realtimeLabel}>✓ Real-time updates active</Text>
-              </View>
-            )}
+            {/* Always show 5-minute polling countdown - PRIMARY mechanism */}
+            <View style={styles.countdownContainer}>
+              <Text style={styles.countdownLabel}>
+                {pusherStatus === 'connected' ? '✓ Real-time + polling' : '⚠️ Polling only'} • Next refresh:
+              </Text>
+              <Text style={styles.countdownTimer}>{formatCountdown()}</Text>
+            </View>
           </View>
         </View>
 
@@ -513,11 +627,25 @@ export default function MonitoringMockup({
                 </Text>
               ) : (
                 panelsData.inProgress.map((area, index) => {
-                  const blockQueued = Math.max(0, area.total - area.processed);
+                  const blockQueued = area.queued || Math.max(0, area.total - area.processed);
                   return (
                     <View key={index} style={styles.blockCard}>
                       <View style={styles.blockHeader}>
-                        <Text style={styles.blockTitle}>Block {area.areaCode}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Text style={styles.blockTitle}>Block {area.areaCode}</Text>
+                          {area.phase > 0 && (
+                            <View style={{
+                              backgroundColor: '#3B82F6',
+                              paddingHorizontal: 6,
+                              paddingVertical: 2,
+                              borderRadius: 4,
+                            }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#FFFFFF' }}>
+                                Phase {area.phase}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
                         <Text style={styles.blockCount}>
                           {area.processed}/{area.total}
                         </Text>
@@ -534,6 +662,14 @@ export default function MonitoringMockup({
                         <Text style={styles.blockPercent}>{area.progress}%</Text>
                         <Text style={styles.blockQueued}>{blockQueued} queued</Text>
                       </View>
+                      {/* Detection breakdown - show detected count only (backend doesn't send undetected) */}
+                      {area.detectedCount > 0 && (
+                        <View style={styles.detectionBreakdown}>
+                          <Text style={styles.detectionText}>
+                            ✅ Detected: <Text style={styles.detectionValue}>{area.detectedCount || 0}</Text>
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   );
                 })
@@ -556,11 +692,26 @@ export default function MonitoringMockup({
                 panelsData.completed.map((area, index) => (
                   <View key={index} style={styles.blockCard}>
                     <View style={styles.blockHeader}>
-                      <Text style={styles.blockTitle}>Block {area.areaCode}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={styles.blockTitle}>Block {area.areaCode}</Text>
+                        {area.phase > 0 && (
+                          <View style={{
+                            backgroundColor: '#3B82F6',
+                            paddingHorizontal: 6,
+                            paddingVertical: 2,
+                            borderRadius: 4,
+                          }}>
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: '#FFFFFF' }}>
+                              Phase {area.phase}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                       <Text style={styles.blockCount}>
                         {area.processed}/{area.total}
                       </Text>
                     </View>
+
                     <View style={styles.blockProgressBar}>
                       <View
                         style={[
@@ -570,6 +721,14 @@ export default function MonitoringMockup({
                       />
                     </View>
                     <Text style={styles.blockPercent}>100%</Text>
+                    {/* Detection breakdown - show detected count only (backend doesn't send undetected) */}
+                    {area.detectedCount > 0 && (
+                      <View style={styles.detectionBreakdown}>
+                        <Text style={styles.detectionText}>
+                          ✅ Detected: <Text style={styles.detectionValue}>{area.detectedCount || 0}</Text>
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 ))
               )}
@@ -586,21 +745,20 @@ export default function MonitoringMockup({
                 {
                   backgroundColor:
                     pusherStatus === 'connected' ? '#10B981' :
-                    pusherStatus === 'degraded' ? '#F59E0B' :
-                    '#EF4444'
+                      pusherStatus === 'degraded' ? '#F59E0B' :
+                        '#EF4444'
                 }
               ]}
             />
             <Text style={[styles.statusText, { color: theme.secondaryText }]}>
-              {pusherStatus === 'connected' && pollingMode === 'normal' && 'Real-time updates'}
-              {pusherStatus === 'connected' && pollingMode === 'aggressive' && 'Recovering to real-time...'}
-              {pusherStatus === 'degraded' && '⚠️ Pusher degraded - 1min polling'}
-              {pusherStatus === 'disconnected' && '⚠️ Pusher offline - 1min polling'}
+              {pusherStatus === 'connected' && `Real-time + 5min polling`}
+              {pusherStatus === 'degraded' && '⚠️ Pusher degraded - 5min polling active'}
+              {pusherStatus === 'disconnected' && '⚠️ Pusher offline - 5min polling active'}
               {pusherStatus === 'connecting' && 'Connecting...'}
             </Text>
           </View>
           <Text style={[styles.lastUpdateText, { color: theme.secondaryText }]}>
-            Last update: {lastUpdate ? lastUpdate.toLocaleTimeString('id-ID') : 'Never'}
+            Last update: {lastUpdate ? lastUpdate.toLocaleTimeString('id-ID') : 'Never'} • Next refresh: {formatCountdown()}
           </Text>
         </View>
       </ScrollView>
@@ -895,6 +1053,25 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '500',
     color: '#F59E0B',
+  },
+  detectionBreakdown: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    gap: 8,
+  },
+  detectionText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  detectionValue: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0EA5E9',
   },
   statusFooter: {
     paddingHorizontal: 24,

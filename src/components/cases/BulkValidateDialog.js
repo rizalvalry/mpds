@@ -37,12 +37,14 @@ export default function BulkValidateDialog({
     setIsLoading(true);
     try {
       // statusId = 2 untuk Bulk Validate (Progress)
+      // Note: Parent component will handle looping through areas and showing results
       await onBulkValidate(selectedWorker, selectedAreas, 2);
+      // Reset state after successful validation
       setSelectedWorker(null);
       setSelectedAreas([]);
-      onClose();
+      // Note: Parent component handles closing the dialog after success
     } catch (error) {
-      Alert.alert('Error', 'Failed to bulk validate cases');
+      Alert.alert('Error', error.message || 'Failed to bulk validate cases');
     } finally {
       setIsLoading(false);
     }

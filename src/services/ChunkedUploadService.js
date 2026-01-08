@@ -68,7 +68,13 @@ export class ChunkedUploadService {
             // In progress: {"message": "Chunk 0 uploaded successfully"}
             // Completed: {"message": "Upload complete", "file_id": "...", "original_name": "..."}
             if (response.message === 'Upload complete') {
-              console.log(`[ChunkUpload] ✅ UPLOAD COMPLETE! File: ${response.original_name}`);
+              console.log(`[ChunkUpload] ========================================`);
+              console.log(`[ChunkUpload] ✅ UPLOAD COMPLETE!`);
+              console.log(`[ChunkUpload] 📁 File: ${response.original_name}`);
+              console.log(`[ChunkUpload] 🆔 File ID: ${response.file_id}`);
+              console.log(`[ChunkUpload] 📂 Blob path: imagedetection/${response.original_name}`);
+              console.log(`[ChunkUpload] 🔄 Worker should detect and process this file`);
+              console.log(`[ChunkUpload] ========================================`);
             } else {
               console.log(`[ChunkUpload] Chunk ${chunkIndex + 1}/${totalChunks} uploaded successfully`);
             }

@@ -6,6 +6,7 @@ import DynamicHeader from '../components/shared/DynamicHeader';
 import { useTheme } from '../contexts/ThemeContext';
 import BulkAssignDialog from '../components/cases/BulkAssignDialog';
 import BulkValidateDialog from '../components/cases/BulkValidateDialog';
+import BulkCancelationDialog from '../components/cases/BulkCancelationDialog';
 import AssigneeDropdown from '../components/cases/AssigneeDropdown';
 import ValidationButton from '../components/cases/ValidationButton';
 import ValidationOptionsDialog from '../components/cases/ValidationOptionsDialog';
@@ -75,6 +76,7 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
   const [selectedCase, setSelectedCase] = useState(null);
   const [showBulkAssignDialog, setShowBulkAssignDialog] = useState(false);
   const [showBulkValidateDialog, setShowBulkValidateDialog] = useState(false);
+  const [showBulkCancelationDialog, setShowBulkCancelationDialog] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showValidationDialog, setShowValidationDialog] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -354,23 +356,75 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
   const handleBulkValidate = async (workerId, areaCodes, statusId) => {
     try {
       console.log('[CasesMockup] Bulk Validate:', { workerId, areaCodes, statusId });
-      const response = await apiService.bulkUpdateCases(workerId, areaCodes, statusId);
+      
+      // Backend only supports single areaCode per request
+      // Loop through each area code and send separate requests
+      const areaCodeArray = Array.isArray(areaCodes) ? areaCodes : [areaCodes];
+      let totalUpdated = 0;
+      const results = [];
+      const errors = [];
+
+      for (const areaCode of areaCodeArray) {
+        try {
+          console.log(`[CasesMockup] Bulk Validate - Processing area: ${areaCode}`);
+          const response = await apiService.bulkUpdateCases(workerId, areaCode, statusId);
+          
+          if (response.success) {
+            const count = response.updated_count || response.UpdatedCount || 0;
+            totalUpdated += count;
+            results.push({ areaCode, count, success: true });
+            console.log(`[CasesMockup] Bulk Validate - Area ${areaCode}: ${count} cases updated`);
+          } else {
+            errors.push({ areaCode, message: response.message || 'Unknown error' });
+            console.warn(`[CasesMockup] Bulk Validate - Area ${areaCode} failed: ${response.message}`);
+          }
+        } catch (areaError) {
+          errors.push({ areaCode, message: areaError.message });
+          console.error(`[CasesMockup] Bulk Validate - Area ${areaCode} error:`, areaError);
+        }
+      }
+
+      // Show summary result
+      if (totalUpdated > 0 || errors.length === 0) {
+        const successAreas = results.filter(r => r.success && r.count > 0).map(r => `${r.areaCode}: ${r.count}`).join(', ');
+        const errorAreas = errors.map(e => e.areaCode).join(', ');
+        
+        let message = `Successfully validated ${totalUpdated} case(s)\n\nStatus set to: Progress (ID: 2)`;
+        if (successAreas) message += `\n\nAreas updated: ${successAreas}`;
+        if (errorAreas) message += `\n\n⚠️ Failed areas: ${errorAreas}`;
+        
+        Alert.alert('Success', message);
+        setShowBulkValidateDialog(false);
+        loadCases(); // Refresh data
+      } else {
+        throw new Error(`All areas failed to validate. Errors: ${errors.map(e => `${e.areaCode}: ${e.message}`).join('; ')}`);
+      }
+    } catch (error) {
+      console.error('[CasesMockup] Error bulk validate:', error);
+      Alert.alert('Error', error.message || 'Failed to bulk validate cases');
+    }
+  };
+
+  const handleBulkCancelation = async (areaCode, statusId) => {
+    try {
+      console.log('[CasesMockup] Bulk Cancelation:', { areaCode, statusId });
+      const response = await apiService.bulkCancelation(areaCode, statusId);
 
       if (response.success) {
         const updatedCount = response.updated_count || 0;
 
         Alert.alert(
           'Success',
-          `Successfully validated ${updatedCount} case(s)\n\nStatus set to: Progress (ID: 2)\n\n${response.message || ''}`
+          `Successfully canceled ${updatedCount} case(s) in Area ${areaCode}\n\nStatus set to: Not Started (ID: 1)\n\n${response.message || ''}`
         );
-        setShowBulkValidateDialog(false);
+        setShowBulkCancelationDialog(false);
         loadCases(); // Refresh data
       } else {
-        throw new Error(response.message || 'Failed to validate cases');
+        throw new Error(response.message || 'Failed to cancel area block');
       }
     } catch (error) {
-      console.error('[CasesMockup] Error bulk validate:', error);
-      Alert.alert('Error', error.message || 'Failed to bulk validate cases');
+      console.error('[CasesMockup] Error bulk cancelation:', error);
+      Alert.alert('Error', error.message || 'Failed to cancel area block');
     }
   };
 
@@ -781,6 +835,37 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
                 <Text style={{ fontSize: 14, color: '#FFFFFF' }}>✓</Text>
                 <Text style={{ fontSize: 13, fontWeight: '600', color: '#FFFFFF' }}>
                   Bulk Validate
+                </Text>
+              </TouchableOpacity>
+
+              {/* Cancelation Button */}
+              <TouchableOpacity
+                onPress={() => {
+                  if (areas && areas.length > 0) {
+                    setShowBulkCancelationDialog(true);
+                  } else {
+                    Alert.alert('Info', 'Area data not available. Please refresh the page.');
+                  }
+                }}
+                style={{
+                  paddingVertical: 8,
+                  paddingHorizontal: 14,
+                  borderRadius: 6,
+                  backgroundColor: '#EF4444',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.1,
+                  shadowRadius: 2,
+                  elevation: 2,
+                  opacity: areas && areas.length > 0 ? 1 : 0.5,
+                }}
+              >
+                <Text style={{ fontSize: 14, color: '#FFFFFF' }}>✖</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#FFFFFF' }}>
+                  Cancelation
                 </Text>
               </TouchableOpacity>
 
@@ -1204,6 +1289,16 @@ function CasesMockupContent({ session, setActiveMenu, setSession, embedded = fal
           areas={areas}
           onGenerateReport={handleGenerateReport}
           onSendEmail={handleSendEmail}
+        />
+      )}
+
+      {/* Bulk Cancelation Dialog */}
+      {Array.isArray(areas) && areas.length > 0 && (
+        <BulkCancelationDialog
+          visible={showBulkCancelationDialog}
+          onClose={() => setShowBulkCancelationDialog(false)}
+          areas={areas}
+          onBulkCancelation={handleBulkCancelation}
         />
       )}
 

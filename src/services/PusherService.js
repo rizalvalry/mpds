@@ -13,17 +13,20 @@ const PUSHER_CONFIG = {
 class PusherService {
   constructor() {
     this.pusher = null;
-    this.channel = null;
+    this.detectionChannel = null;
+    this.progressChannel = null;
     this.isConnected = false;
     this.eventCallback = null;
+    this.progressCallback = null;
   }
 
   /**
    * Connect to Pusher and subscribe to detection channel
    * @param {Function} onFileDetected - Callback when file is detected
+   * @param {Function} onBlockProgress - Callback for block progress updates (optional)
    * @returns {boolean} Connection status
    */
-  connect(onFileDetected = null) {
+  connect(onFileDetected = null, onBlockProgress = null) {
     try {
       if (this.isConnected && this.pusher) {
         console.log('[Pusher] Already connected');
@@ -42,8 +45,9 @@ class PusherService {
         enabledTransports: ['ws', 'wss'],
       });
 
-      // Store callback
+      // Store callbacks
       this.eventCallback = onFileDetected;
+      this.progressCallback = onBlockProgress;
 
       // Connection state monitoring
       this.pusher.connection.bind('connected', () => {
@@ -61,35 +65,55 @@ class PusherService {
         this.isConnected = false;
       });
 
-      // Subscribe to detection channel
-      // Channel name: detection-events (from Pusher Debug Console)
-      this.channel = this.pusher.subscribe('detection-events');
+      // Subscribe to detection-events channel (per-file events)
+      this.detectionChannel = this.pusher.subscribe('detection-events');
 
       // Bind to detection events
-      this.channel.bind('file-detected', (data) => {
+      this.detectionChannel.bind('file-detected', (data) => {
         console.log('[Pusher] 📥 file-detected event:', data);
         this.handleDetectionEvent('file-detected', data);
       });
 
-      this.channel.bind('file-undetected', (data) => {
+      this.detectionChannel.bind('file-undetected', (data) => {
         console.log('[Pusher] 📥 file-undetected event:', data);
         this.handleDetectionEvent('file-undetected', data);
       });
 
-      this.channel.bind('file-queued', (data) => {
+      this.detectionChannel.bind('file-queued', (data) => {
         console.log('[Pusher] 📥 file-queued event:', data);
         this.handleDetectionEvent('file-queued', data);
       });
 
       // Handle subscription success
-      this.channel.bind('pusher:subscription_succeeded', () => {
+      this.detectionChannel.bind('pusher:subscription_succeeded', () => {
         console.log('[Pusher] ✅ Subscribed to detection-events channel');
       });
 
       // Handle subscription error
-      this.channel.bind('pusher:subscription_error', (error) => {
+      this.detectionChannel.bind('pusher:subscription_error', (error) => {
         console.error('[Pusher] ❌ Subscription error:', error);
       });
+
+      // Subscribe to block-progress channel (aggregate progress per block)
+      if (onBlockProgress) {
+        this.progressChannel = this.pusher.subscribe('block-progress');
+
+        // Bind to block progress events (batched every 10 files)
+        this.progressChannel.bind('block-progress', (data) => {
+          console.log('[Pusher] 📊 block-progress event:', data);
+          this.handleProgressEvent(data);
+        });
+
+        // Handle subscription success
+        this.progressChannel.bind('pusher:subscription_succeeded', () => {
+          console.log('[Pusher] ✅ Subscribed to block-progress channel');
+        });
+
+        // Handle subscription error
+        this.progressChannel.bind('pusher:subscription_error', (error) => {
+          console.error('[Pusher] ❌ Block progress subscription error:', error);
+        });
+      }
 
       return true;
     } catch (error) {
@@ -124,16 +148,46 @@ class PusherService {
   }
 
   /**
+   * Handle block progress event from Pusher (batched updates per area)
+   * @param {Object} data - Progress data from backend worker
+   */
+  handleProgressEvent(data) {
+    try {
+      console.log('[Pusher] Block progress event:', {
+        area_code: data.area_code,
+        detected_count: data.detected_count,
+        undetected_count: data.undetected_count,
+        total_processed: data.total_processed,
+      });
+
+      // Call progress callback if provided
+      if (this.progressCallback && typeof this.progressCallback === 'function') {
+        this.progressCallback(data);
+      }
+    } catch (error) {
+      console.error('[Pusher] Error handling progress event:', error);
+    }
+  }
+
+  /**
    * Disconnect from Pusher
    */
   disconnect() {
     try {
-      // Unsubscribe from channel
-      if (this.channel) {
-        this.channel.unbind_all();
+      // Unsubscribe from detection-events channel
+      if (this.detectionChannel) {
+        this.detectionChannel.unbind_all();
         this.pusher.unsubscribe('detection-events');
-        this.channel = null;
-        console.log('[Pusher] Unsubscribed from channel');
+        this.detectionChannel = null;
+        console.log('[Pusher] Unsubscribed from detection-events channel');
+      }
+
+      // Unsubscribe from block-progress channel
+      if (this.progressChannel) {
+        this.progressChannel.unbind_all();
+        this.pusher.unsubscribe('block-progress');
+        this.progressChannel = null;
+        console.log('[Pusher] Unsubscribed from block-progress channel');
       }
 
       // Disconnect Pusher
@@ -145,6 +199,7 @@ class PusherService {
 
       this.isConnected = false;
       this.eventCallback = null;
+      this.progressCallback = null;
     } catch (error) {
       console.error('[Pusher] Error disconnecting:', error);
     }
@@ -156,6 +211,48 @@ class PusherService {
    */
   getConnectionStatus() {
     return this.isConnected && this.pusher && this.pusher.connection.state === 'connected';
+  }
+
+  /**
+   * Subscribe to a specific channel event with a callback
+   * Used by PusherProgressService for additional event handling
+   * @param {string} channelName - Channel name to subscribe to
+   * @param {Function} callback - Callback function for events
+   */
+  subscribe(channelName, callback) {
+    try {
+      if (!this.pusher) {
+        console.warn('[Pusher] Cannot subscribe - not connected');
+        return false;
+      }
+
+      // Store callback for the channel
+      if (!this.additionalCallbacks) {
+        this.additionalCallbacks = {};
+      }
+      this.additionalCallbacks[channelName] = callback;
+
+      console.log(`[Pusher] Additional subscription registered for: ${channelName}`);
+      return true;
+    } catch (error) {
+      console.error('[Pusher] Error subscribing:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Unsubscribe from a specific channel
+   * @param {string} channelName - Channel name to unsubscribe from
+   */
+  unsubscribe(channelName) {
+    try {
+      if (this.additionalCallbacks && this.additionalCallbacks[channelName]) {
+        delete this.additionalCallbacks[channelName];
+        console.log(`[Pusher] Unsubscribed additional callback for: ${channelName}`);
+      }
+    } catch (error) {
+      console.error('[Pusher] Error unsubscribing:', error);
+    }
   }
 
   /**

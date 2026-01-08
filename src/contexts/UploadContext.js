@@ -266,21 +266,30 @@ export const UploadProvider = ({ children }) => {
           areaHandle: areaHandle, // Send as array, e.g., ["C"] or ["D"]
         };
 
-        console.log(`[UploadContext] Creating upload details:`, uploadDetailsPayload);
+        console.log(`[UploadContext] ========================================`);
+        console.log(`[UploadContext] Creating upload details for backend.worker`);
+        console.log(`[UploadContext] Payload:`, uploadDetailsPayload);
+        console.log(`[UploadContext] areaHandle type:`, Array.isArray(areaHandle) ? `array[${areaHandle.length}]` : typeof areaHandle);
+        console.log(`[UploadContext] areaHandle value:`, JSON.stringify(areaHandle));
+        console.log(`[UploadContext] ========================================`);
 
         try {
           const uploadDetailsResult = await apiService.createUploadDetails(uploadDetailsPayload);
           if (uploadDetailsResult.success) {
-            console.log(`[UploadContext] Upload details created successfully`);
+            console.log(`[UploadContext] ✅ Upload details created successfully!`);
+            console.log(`[UploadContext] 📋 Session ID: ${uploadDetailsResult.id || 'N/A'}`);
+            console.log(`[UploadContext] 📍 Area: ${areaHandle.join(', ')}`);
+            console.log(`[UploadContext] 📊 Total images: ${images.length}`);
+            console.log(`[UploadContext] 🔄 Worker should now process these images and send Pusher events`);
           } else {
-            console.warn(`[UploadContext] Failed to create upload details:`, uploadDetailsResult.message);
+            console.warn(`[UploadContext] ❌ Failed to create upload details:`, uploadDetailsResult.message);
           }
         } catch (detailsError) {
-          console.warn(`[UploadContext] Error creating upload details:`, detailsError);
+          console.warn(`[UploadContext] ❌ Error creating upload details:`, detailsError);
           // Don't block upload if this fails
         }
       } else {
-        console.warn(`[UploadContext] No session/drone data available, skipping upload details creation`);
+        console.warn(`[UploadContext] ⚠️ No session/drone data available, skipping upload details creation`);
       }
 
       const result = await chunkedUploadService.uploadBatch(

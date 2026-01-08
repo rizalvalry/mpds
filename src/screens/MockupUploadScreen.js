@@ -111,7 +111,7 @@ export default function MockupUploadScreen({ session, setSession, activeMenu, se
                   <Text style={styles.browseIcon}>📄</Text>
                   <Text style={styles.browsePlus}>+</Text>
                 </View>
-                <Text style={styles.browseTitle}>Browse File test</Text>
+                <Text style={styles.browseTitle}>Browse File</Text>
                 <Text style={styles.browseSubtitle}>
                   Pilih dari pengelola file (mendukung massal)
                 </Text>

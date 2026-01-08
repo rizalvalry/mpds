@@ -13,6 +13,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import apiService from '../services/ApiService';
 import PusherService from '../services/PusherService';
+import { markDetectionStarted, markDetectionCompleted } from '../api/api';
+import { getSession } from '../api/Auth';
 
 // Polling configuration
 const POLLING_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
@@ -31,6 +33,10 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
   // Real-time progress from pusher (aggregate count per block)
   // Format: { 'A': { detected: 50, undetected: 30, total_processed: 80 }, 'B': {...} }
   const [pusherProgress, setPusherProgress] = useState({});
+
+  // Detection timeline tracking (prevent duplicate API calls)
+  // Format: { 'A': { started: true, completed: false }, 'B': {...} }
+  const [detectionTimeline, setDetectionTimeline] = useState({});
 
   // Enhanced metrics state for comparing UploadDetails vs bird_drops_by_block
   const [comparisonMetrics, setComparisonMetrics] = useState({
@@ -94,13 +100,15 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
     const progressChannel = PusherService.subscribe('block-progress');
 
     // Bind event handler for aggregate progress updates
-    progressChannel.bind('block-progress', (data) => {
+    progressChannel.bind('block-progress', async (data) => {
       console.log('[Monitoring] 📩 Received block-progress event:', data);
 
       const areaCode = data.area_code;
       const detectedCount = data.detected_count || 0;
       const undetectedCount = data.undetected_count || 0;
       const totalProcessed = data.total_processed || 0;
+      const isFirstFile = data.is_first_file || false;  // NEW FLAG
+      const isFinal = data.is_final || false;           // NEW FLAG
 
       if (areaCode) {
         // SET progress (not increment) - this avoids lost events issue
@@ -110,6 +118,7 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
             detected: detectedCount,
             undetected: undetectedCount,
             total_processed: totalProcessed,
+            is_complete: isFinal,  // Track completion status
           },
         }));
 
@@ -117,7 +126,96 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
           detected: detectedCount,
           undetected: undetectedCount,
           total_processed: totalProcessed,
+          is_first_file: isFirstFile,
+          is_final: isFinal,
         });
+
+        // ========================================
+        // DETECTION STARTED: Mark via API
+        // ========================================
+        if (isFirstFile) {
+          setDetectionTimeline((prev) => {
+            // Check if already marked (prevent duplicate calls)
+            if (prev[areaCode]?.started) {
+              console.log(`[Monitoring] Detection already started for Block ${areaCode}, skipping API call`);
+              return prev;
+            }
+
+            console.log(`[Monitoring] 🚀 First file detected for Block ${areaCode}! Marking detection started...`);
+
+            // Call API in background (don't block UI)
+            (async () => {
+              try {
+                const currentSession = await getSession();
+                const operator = currentSession?.drone?.drone_code || droneCode || 'Unknown';
+
+                const success = await markDetectionStarted(operator, areaCode);
+
+                if (success) {
+                  console.log(`[Monitoring] ✅ Detection started tracked for Block ${areaCode}`);
+                  setDetectionTimeline((prev2) => ({
+                    ...prev2,
+                    [areaCode]: { ...prev2[areaCode], started: true },
+                  }));
+                }
+              } catch (error) {
+                console.error('[Monitoring] ⚠️ Failed to mark detection start:', error);
+              }
+            })();
+
+            return {
+              ...prev,
+              [areaCode]: { ...prev[areaCode], started: false }, // Will be updated to true on success
+            };
+          });
+        }
+
+        // ========================================
+        // DETECTION COMPLETED: Mark via API
+        // ========================================
+        if (isFinal) {
+          setDetectionTimeline((prev) => {
+            // Check if already marked (prevent duplicate calls)
+            if (prev[areaCode]?.completed) {
+              console.log(`[Monitoring] Detection already completed for Block ${areaCode}, skipping API call`);
+              return prev;
+            }
+
+            console.log(`[Monitoring] 🎉 Final update for Block ${areaCode}! Marking detection completed...`);
+
+            // Call API in background (don't block UI)
+            (async () => {
+              try {
+                const currentSession = await getSession();
+                const operator = currentSession?.drone?.drone_code || droneCode || 'Unknown';
+
+                const success = await markDetectionCompleted(
+                  operator,
+                  areaCode,
+                  detectedCount,
+                  undetectedCount
+                );
+
+                if (success) {
+                  console.log(`[Monitoring] ✅ Detection completed tracked for Block ${areaCode}`);
+                  console.log(`[Monitoring] Total: ${detectedCount} detected, ${undetectedCount} undetected`);
+
+                  setDetectionTimeline((prev2) => ({
+                    ...prev2,
+                    [areaCode]: { ...prev2[areaCode], completed: true },
+                  }));
+                }
+              } catch (error) {
+                console.error('[Monitoring] ⚠️ Failed to mark detection completion:', error);
+              }
+            })();
+
+            return {
+              ...prev,
+              [areaCode]: { ...prev[areaCode], completed: false }, // Will be updated to true on success
+            };
+          });
+        }
       }
     });
 
@@ -127,7 +225,7 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
       progressChannel.unbind('block-progress');
       PusherService.unsubscribe('block-progress');
     };
-  }, []);
+  }, [droneCode]);
 
   // Helper: Get today's date in YYYY-MM-DD format (Asia/Jakarta timezone)
   const getTodayDate = useCallback(() => {
@@ -147,36 +245,67 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
     try {
       const inProgress = [];
       const complete = [];
+      const now = new Date();
 
-      // Create map of total uploaded per block from UploadDetails
+      // Create map of total uploaded per block from UploadDetails (with created_at tracking)
       const uploadedPerBlock = {};
       uploadDetailsData.forEach((session) => {
         const areaHandle = session.area_handle; // Now string format from backend
         const startUploads = session.start_uploads || 0;
+        const createdAt = session.created_at ? new Date(session.created_at) : null;
+
         if (areaHandle) {
-          uploadedPerBlock[areaHandle] = (uploadedPerBlock[areaHandle] || 0) + startUploads;
+          if (!uploadedPerBlock[areaHandle]) {
+            uploadedPerBlock[areaHandle] = {
+              total: 0,
+              oldestCreatedAt: createdAt
+            };
+          }
+          uploadedPerBlock[areaHandle].total += startUploads;
+
+          // Track oldest created_at for this area
+          if (createdAt && (!uploadedPerBlock[areaHandle].oldestCreatedAt || createdAt < uploadedPerBlock[areaHandle].oldestCreatedAt)) {
+            uploadedPerBlock[areaHandle].oldestCreatedAt = createdAt;
+          }
         }
       });
 
       // Process each block that has uploads
       Object.keys(uploadedPerBlock).forEach((areaCode) => {
-        const totalUploaded = uploadedPerBlock[areaCode];
+        const totalUploaded = uploadedPerBlock[areaCode].total;
+        const createdAt = uploadedPerBlock[areaCode].oldestCreatedAt;
 
         // Get real-time progress from pusher (if available)
         const pusherData = pusherProgress[areaCode];
         const detectedCount = pusherData?.detected || 0;
         const undetectedCount = pusherData?.undetected || 0;
-        const totalProcessed = pusherData?.total_processed || 0;
+        let totalProcessed = pusherData?.total_processed || 0;
+
+        // ========================================
+        // AUTO-COMPLETE: If detection running > 60 minutes, force 100% complete
+        // ========================================
+        let autoCompleted = false;
+        if (createdAt) {
+          const elapsedMinutes = (now - createdAt) / 1000 / 60; // Convert to minutes
+
+          if (elapsedMinutes >= 60 && totalProcessed < totalUploaded) {
+            console.log(`[Monitoring] ⏱️ Block ${areaCode}: Detection running for ${Math.round(elapsedMinutes)} minutes (>60 min threshold)`);
+            console.log(`[Monitoring] 🔄 Auto-completing Block ${areaCode}: ${totalProcessed}/${totalUploaded} → ${totalUploaded}/${totalUploaded} (100%)`);
+            totalProcessed = totalUploaded; // Force 100% complete
+            autoCompleted = true;
+          }
+        }
 
         const blockData = {
           area: areaCode,
-          processed: totalProcessed,        // From pusher (real-time worker progress)
+          processed: totalProcessed,        // From pusher (real-time worker progress) or auto-completed
           total: totalUploaded,             // From UploadDetails (user uploaded count)
           detectedCount: detectedCount,     // From pusher (real-time detected count)
           undetectedCount: undetectedCount, // From pusher (real-time undetected count)
+          autoCompleted: autoCompleted,     // Flag if auto-completed due to 60min timeout
         };
 
-        console.log(`[Monitoring] Block ${areaCode}: ${totalProcessed}/${totalUploaded} (${detectedCount} detected, ${undetectedCount} undetected) [Pusher: ${pusherData ? 'YES' : 'NO'}]`);
+        console.log(`[Monitoring] Block ${areaCode}: ${totalProcessed}/${totalUploaded} (${detectedCount} detected, ${undetectedCount} undetected) [Pusher: ${pusherData ? 'YES' : 'NO'}] [AutoComplete: ${autoCompleted ? 'YES' : 'NO'}]`);
 
         // Categorize as complete or in progress
         if (totalUploaded > 0) {
@@ -739,6 +868,29 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
                               {block.processed}/{block.total} (100%)
                             </Text>
                           </View>
+
+                          {/* Auto-Completed Badge (if applicable) */}
+                          {block.autoCompleted && (
+                            <View style={{
+                              backgroundColor: 'rgba(255,193,7,0.15)',
+                              borderRadius: 6,
+                              paddingHorizontal: 8,
+                              paddingVertical: 4,
+                              marginTop: 6,
+                              marginBottom: 6,
+                              borderWidth: 1,
+                              borderColor: 'rgba(255,193,7,0.4)',
+                            }}>
+                              <Text style={{
+                                fontSize: 9,
+                                fontWeight: '700',
+                                color: '#F59E0B',
+                                textAlign: 'center',
+                              }}>
+                                ⏱️ AUTO-COMPLETED (60+ min timeout)
+                              </Text>
+                            </View>
+                          )}
 
                           {/* Detection breakdown */}
                           <View style={styles.blockDetailRow}>

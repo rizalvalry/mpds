@@ -1,68 +1,23 @@
 /**
  * EXIF GPS Extractor for React Native
  * Extracts GPS coordinates from image metadata
+ *
+ * NOTE: This module is DEPRECATED - GPS extraction is now handled by backend
+ * via /area/validate/image endpoint using MetadataExtractor library
  */
 
 import * as ImageManipulator from 'expo-image-manipulator';
-import RNExif from 'react-native-exif';
 
 /**
- * Extract GPS coordinates from image EXIF data using react-native-exif
+ * DEPRECATED: Extract GPS coordinates from image EXIF data
+ * Use backend /area/validate/image endpoint instead
  *
  * @param {string} imageUri - Image URI from document picker or file system
  * @returns {Promise<{latitude: number, longitude: number} | null>}
  */
 export const extractGPSFromImage = async (imageUri) => {
-  try {
-    console.log('[ExifExtractor] Extracting GPS from:', imageUri);
-
-    // Convert file:// URI to platform-specific path
-    let filePath = imageUri;
-    if (imageUri.startsWith('file://')) {
-      filePath = imageUri.replace('file://', '');
-    }
-
-    // Read EXIF data using react-native-exif
-    const exifData = await RNExif.getExif(filePath);
-
-    console.log('[ExifExtractor] EXIF data keys:', Object.keys(exifData));
-
-    // Check for GPS coordinates
-    if (exifData.GPSLatitude && exifData.GPSLongitude) {
-      let latitude = exifData.GPSLatitude;
-      let longitude = exifData.GPSLongitude;
-
-      // Handle reference (N/S for latitude, E/W for longitude)
-      if (exifData.GPSLatitudeRef === 'S') {
-        latitude = -Math.abs(latitude);
-      }
-      if (exifData.GPSLongitudeRef === 'W') {
-        longitude = -Math.abs(longitude);
-      }
-
-      console.log('[ExifExtractor] GPS extracted from file:', { latitude, longitude });
-      return { latitude, longitude };
-    }
-
-    // Fallback: Check for original GPS data
-    if (exifData.latitude && exifData.longitude) {
-      console.log('[ExifExtractor] GPS found in exifData:', {
-        latitude: exifData.latitude,
-        longitude: exifData.longitude
-      });
-      return {
-        latitude: exifData.latitude,
-        longitude: exifData.longitude
-      };
-    }
-
-    console.warn('[ExifExtractor] No GPS data found in EXIF');
-    return null;
-
-  } catch (error) {
-    console.error('[ExifExtractor] Error extracting GPS:', error);
-    return null;
-  }
+  console.warn('[ExifExtractor] DEPRECATED: This function is no longer used. GPS extraction is handled by backend.');
+  return null;
 };
 
 /**

@@ -11,6 +11,7 @@ import {
   Dimensions,
   ScrollView,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import apiService from '../../services/ApiService';
 import * as Location from 'expo-location';
@@ -494,45 +495,48 @@ export default function DynamicHeader({
       {/* Settings Dropdown Menu */}
       {showSettingsMenu && (
         <View style={styles.settingsMenu}>
-          {/* Theme Toggle */}
-          <View style={styles.menuItem}>
-            <Text style={styles.menuItemText}>White Mode</Text>
-            <Switch
-              value={!isDarkMode}
-              onValueChange={(value) => {
-                toggleTheme();
-              }}
-              trackColor={{ false: 'rgba(14,165,233,0.45)', true: '#D1D5DB' }}
-              thumbColor={!isDarkMode ? '#FFFFFF' : '#0EA5E9'}
-              ios_backgroundColor="rgba(14,165,233,0.45)"
-            />
-          </View>
-
-          {/* Divider */}
-          <View style={styles.menuDivider} />
-
-          {/* Drone Code Info */}
-          <View style={styles.menuInfoItem}>
-            <Text style={styles.droneMenuIcon}>🚁</Text>
-            <Text style={styles.droneMenuText}>
-              {session?.drone?.drone_code || 'Drone-001'}
-            </Text>
-          </View>
-
-          {/* Divider */}
-          <View style={styles.menuDivider} />
-
-          {/* Logout Button */}
-          <TouchableOpacity
-            style={styles.logoutButton}
-            onPress={() => {
-              setShowSettingsMenu(false);
-              handleLogout();
-            }}
+          <ScrollView
+            style={styles.menuScrollView}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
           >
-            <Text style={styles.logoutIcon}>🚪</Text>
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
+            {/* Theme Toggle */}
+            <View style={styles.menuItem}>
+              <Text style={styles.menuItemText}>White Mode</Text>
+              <Switch
+                value={!isDarkMode}
+                onValueChange={(value) => {
+                  toggleTheme();
+                }}
+                trackColor={{ false: '#D1D5DB', true: '#0EA5E9' }}
+                thumbColor={'#FFFFFF'}
+                ios_backgroundColor="#D1D5DB"
+              />
+            </View>
+
+            {/* Drone Code Info */}
+            <View style={styles.menuInfoItem}>
+              <Text style={styles.droneMenuIcon}>🚁</Text>
+              <Text style={styles.droneMenuText}>
+                {session?.drone?.drone_code || 'Drone-001'}
+              </Text>
+            </View>
+
+            {/* Divider */}
+            <View style={styles.menuDivider} />
+
+            {/* Logout Button */}
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={() => {
+                setShowSettingsMenu(false);
+                handleLogout();
+              }}
+            >
+              <Text style={styles.logoutIcon}>🚪</Text>
+              <Text style={styles.logoutText}>Logout</Text>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
       )}
     </>
@@ -700,12 +704,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     minWidth: 200,
+    maxHeight: Dimensions.get('window').height - 100, // Prevent overflow
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 8,
     zIndex: 1000,
+  },
+  menuScrollView: {
+    maxHeight: Dimensions.get('window').height - 140, // Account for padding and spacing
   },
   menuItem: {
     flexDirection: 'row',
@@ -717,6 +725,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#374151',
+  },
+  menuItemSubtext: {
+    fontSize: 12,
+    fontWeight: '400',
+    color: '#6B7280',
+    marginTop: 2,
   },
   menuDivider: {
     height: 1,

@@ -364,18 +364,36 @@ export class ApiService {
     });
   }
 
-  async bulkUpdateCases(workerId, areaCodes, statusId) {
+  async bulkUpdateCases(workerId, areaCode, statusId) {
     const url = this.buildUrl(this.endpoints.bulkUpdate);
-    const areaCodeString = Array.isArray(areaCodes) ? areaCodes.join(',') : areaCodes;
+    
+    // Backend only supports single areaCode - do NOT join multiple codes
+    // If array is passed, only use first element (caller should loop for multiple)
+    const singleAreaCode = Array.isArray(areaCode) ? areaCode[0] : areaCode;
 
-    console.log('[API] bulkUpdateCases - Sending:', { assignTo: workerId, areaCode: areaCodeString, statusId });
+    console.log('[API] bulkUpdateCases - Sending:', { assignTo: workerId, areaCode: singleAreaCode, statusId });
 
     return this.fetchData({
       method: 'POST',
       url,
       body: {
         assignTo: workerId,
-        areaCode: areaCodeString,
+        areaCode: singleAreaCode,
+        statusId: statusId
+      },
+    });
+  }
+
+  async bulkCancelation(areaCode, statusId = 1) {
+    const url = this.buildUrl(this.endpoints.bulkUpdate);
+
+    console.log('[API] bulkCancelation - Sending:', { areaCode, statusId });
+
+    return this.fetchData({
+      method: 'POST',
+      url,
+      body: {
+        areaCode: areaCode,
         statusId: statusId
       },
     });
@@ -466,6 +484,11 @@ export class ApiService {
   async validateAreaFromImage(imageUri, expectedAreaBlock = null) {
     await this.init();
 
+    console.log('[ApiService] Validating area from image:', {
+      imageUri,
+      expectedAreaBlock,
+    });
+
     // Create FormData for multipart/form-data request
     const formData = new FormData();
 
@@ -473,6 +496,8 @@ export class ApiService {
     const filename = imageUri.split('/').pop();
     const match = /\.(\w+)$/.exec(filename);
     const type = match ? `image/${match[1]}` : 'image/jpeg';
+
+    console.log('[ApiService] Image details:', { filename, type });
 
     formData.append('image', {
       uri: imageUri,
@@ -485,24 +510,37 @@ export class ApiService {
       formData.append('expectedAreaBlock', expectedAreaBlock);
     }
 
-    const url = this.buildUrl('/cases/area/validate/image');
+    // FIX: Correct endpoint path (was /cases/area/validate/image)
+    const url = this.buildUrl('/area/validate/image');
 
-    // Use fetch directly for FormData
+    console.log('[ApiService] Request URL:', url);
+
+    // PUBLIC ENDPOINT - No authentication required for GPS validation
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         // Don't set Content-Type - let browser set it with boundary
-        // 'Content-Type': 'multipart/form-data' is auto-added by fetch
+        // 'Content-Type': 'multipart/form-data' is auto-added by fetch with boundary
       },
       body: formData,
     });
 
+    console.log('[ApiService] Response status:', response.status);
+
     if (!response.ok) {
       const errorText = await response.text();
+      console.error('[ApiService] Validation error:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText,
+      });
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
 
-    return await response.json();
+    const result = await response.json();
+    console.log('[ApiService] Validation result:', result);
+
+    return result;
   }
 
   // Dashboard APIs - exact match with Flutter main_api.dart
@@ -925,11 +963,15 @@ export class ApiService {
    * GET Upload Details by date
    * @param {string} createdAt - Date in YYYY-MM-DD format
    * @returns {Promise<Object>} Upload details response
+   *
+   * WORKAROUND: Backend createdAt filter is broken, so we fetch all data
+   * and filter client-side by date
    */
   async getUploadDetails(createdAt) {
-    const url = `https://${this.baseUrl}/services${this.endpoints.uploadDetails}?createdAt=${createdAt}`;
+    // WORKAROUND: Fetch without date filter (backend filter is broken)
+    const url = `https://${this.baseUrl}/services${this.endpoints.uploadDetails}`;
 
-    console.log(`[API] GET ${url}`);
+    console.log(`[API] GET ${url} (filtering client-side for date: ${createdAt})`);
 
     try {
       const response = await fetch(url, {
@@ -938,12 +980,23 @@ export class ApiService {
       });
 
       const data = await response.json();
-      console.log(`[API] Response:`, data);
+      console.log(`[API] Response (total records):`, data.data?.length || 0);
 
       if (data.success) {
+        // Client-side filter by date
+        const filteredData = (data.data || []).filter((item) => {
+          if (!item.created_at) return false;
+
+          // Extract date part from ISO timestamp (e.g., "2025-12-17T00:32:24.051108+07:00" -> "2025-12-17")
+          const itemDate = item.created_at.split('T')[0];
+          return itemDate === createdAt;
+        });
+
+        console.log(`[API] Filtered to ${filteredData.length} records for date ${createdAt}`);
+
         return {
           success: true,
-          data: data.data || [],
+          data: filteredData,
           message: data.message,
         };
       } else {
@@ -977,7 +1030,16 @@ export class ApiService {
     const url = `https://${this.baseUrl}/services${this.endpoints.uploadDetails}`;
 
     console.log(`[API] POST ${url}`);
-    console.log(`[API] Payload:`, uploadData);
+    console.log(`[API] Payload details:`, {
+      operator: uploadData.operator,
+      status: uploadData.status,
+      startUploads: uploadData.startUploads,
+      endUploads: uploadData.endUploads,
+      areaHandle: uploadData.areaHandle,
+      areaHandleType: Array.isArray(uploadData.areaHandle) ? 'array' : typeof uploadData.areaHandle,
+      areaHandleLength: Array.isArray(uploadData.areaHandle) ? uploadData.areaHandle.length : 'N/A',
+    });
+    console.log(`[API] Full Payload:`, JSON.stringify(uploadData, null, 2));
 
     try {
       const response = await fetch(url, {
@@ -987,12 +1049,19 @@ export class ApiService {
       });
 
       const data = await response.json();
-      console.log(`[API] Response:`, data);
+      console.log(`[API] Response status:`, response.status);
+      console.log(`[API] Response data:`, data);
+
+      // Log the created ID if successful
+      if (data.success && data.id) {
+        console.log(`[API] ✅ Upload session created with ID: ${data.id}`);
+      }
 
       if (response.ok && data.success) {
         return {
           success: true,
-          data: data.data || {},
+          data: data.data || data, // Include full response data
+          id: data.id, // Include the ID
           message: data.message || 'Upload session created successfully',
         };
       } else {
@@ -1004,6 +1073,71 @@ export class ApiService {
       }
     } catch (error) {
       console.error(`[API] POST Upload Details error:`, error);
+      return {
+        success: false,
+        data: null,
+        message: error.message,
+      };
+    }
+  }
+
+  /**
+   * PUT Upload Details - Update progress (end_uploads)
+   *
+   * CRITICAL: Backend API MUST filter by operator + areaCode to update correct row
+   *
+   * @param {Object} updateData - Update data
+   * @param {string} updateData.operator - Operator name (drone_code) e.g., "Drone-001"
+   * @param {string} updateData.areaCode - Area block code e.g., "A", "B", "C"
+   * @param {string} updateData.status - Upload status ('active')
+   * @param {number} updateData.endUploads - Files completed so far (total_processed from Pusher)
+   * @param {number} updateData.phase - Phase number (default 0)
+   * @param {string} updateData.updatedAt - Timestamp of update
+   * @returns {Promise<Object>} Update response
+   *
+   * @example
+   * // Update Block M for Drone-002 with 105 files processed
+   * await updateUploadProgress({
+   *   operator: 'Drone-002',
+   *   areaCode: 'M',
+   *   status: 'active',
+   *   endUploads: 105,
+   *   phase: 0,
+   *   updatedAt: new Date().toISOString()
+   * });
+   */
+  async updateUploadProgress(updateData) {
+    const url = `https://${this.baseUrl}/services${this.endpoints.uploadDetails}`;
+
+    console.log(`[API] PUT ${url}`);
+    console.log(`[API] Update payload for Block ${updateData.areaCode || 'UNKNOWN'}:`, updateData);
+
+    try {
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: this.getHeaders(),
+        body: JSON.stringify(updateData),
+      });
+
+      const data = await response.json();
+      console.log(`[API] PUT Response status:`, response.status);
+      console.log(`[API] PUT Response data:`, data);
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: data.data || data,
+          message: data.message || 'Progress updated successfully',
+        };
+      } else {
+        return {
+          success: false,
+          data: null,
+          message: data.message || 'Failed to update progress',
+        };
+      }
+    } catch (error) {
+      console.error(`[API] PUT Upload Details error:`, error);
       return {
         success: false,
         data: null,

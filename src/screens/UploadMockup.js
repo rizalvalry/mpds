@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Dimensions, Alert, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as DocumentPicker from 'expo-document-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useUpload } from '../contexts/UploadContext';
 import DynamicHeader from '../components/shared/DynamicHeader';
 import { useTheme } from '../contexts/ThemeContext';
@@ -32,7 +33,11 @@ export default function UploadMockup({
   const [selectedImages, setSelectedImages] = useState([]);
   const { theme, isDarkMode } = useTheme();
 
-  // MANDATORY: Area selection state (SOP requirement - user must select 1 block area before upload)
+  // MANDATORY: Area validation is ALWAYS enabled (no toggle)
+  // User MUST select area block after browsing images
+  const enableAreaValidation = true;
+
+  // Area selection state (REQUIRED - mandatory selection)
   const [selectedAreaBlock, setSelectedAreaBlock] = useState(null);
   const [showAreaDropdown, setShowAreaDropdown] = useState(false);
   const [areaList, setAreaList] = useState([]); // List of all available areas from API
@@ -105,32 +110,110 @@ export default function UploadMockup({
 
         // Show alert if validation fails
         if (!validation.valid) {
-          Alert.alert(
-            'Area Mismatch',
-            validation.message,
-            [
-              {
-                text: 'Cancel',
-                style: 'cancel',
-              },
-              validation.detectedArea && {
-                text: `Use Block ${validation.detectedArea}`,
-                onPress: () => {
-                  setSelectedAreaBlock(validation.detectedArea);
-                  console.log(`[UploadMockup] Switched to detected area: ${validation.detectedArea}`);
+          // Check if it's a backend error (404, 415, network error)
+          const isBackendError = validation.error === 'validation_error' ||
+                                  validation.error === 'backend_validation_failed' ||
+                                  validation.message?.includes('404') ||
+                                  validation.message?.includes('415') ||
+                                  validation.message?.includes('Network');
+
+          if (isBackendError) {
+            // Backend error - allow user to continue anyway
+            Alert.alert(
+              'Validation Service Unavailable',
+              `${validation.message}\n\nValidation service is currently unavailable. You can still upload images using your selected Block ${selectedAreaBlock}.`,
+              [
+                {
+                  text: 'Cancel',
+                  style: 'cancel',
                 },
-              },
-            ].filter(Boolean)
-          );
+                {
+                  text: 'Continue Anyway',
+                  style: 'default',
+                  onPress: () => {
+                    // Override validation - allow upload with selected block
+                    setAreaValidation({
+                      isValid: true, // Force valid to allow upload
+                      checked: true,
+                      detectedBlock: selectedAreaBlock,
+                      message: `⚠️ Uploading to Block ${selectedAreaBlock} (validation skipped)`,
+                    });
+                    console.log(`[UploadMockup] User bypassed validation error - continuing with Block ${selectedAreaBlock}`);
+                  },
+                },
+              ]
+            );
+          } else {
+            // GPS mismatch - show normal mismatch dialog
+            Alert.alert(
+              'Area Mismatch',
+              validation.message,
+              [
+                {
+                  text: 'Cancel',
+                  style: 'cancel',
+                },
+                validation.detectedArea && {
+                  text: `Use Block ${validation.detectedArea}`,
+                  onPress: () => {
+                    setSelectedAreaBlock(validation.detectedArea);
+                    console.log(`[UploadMockup] Switched to detected area: ${validation.detectedArea}`);
+                  },
+                },
+                {
+                  text: 'Continue Anyway',
+                  style: 'destructive',
+                  onPress: () => {
+                    // Allow upload even with mismatch
+                    setAreaValidation({
+                      isValid: true, // Force valid to allow upload
+                      checked: true,
+                      detectedBlock: selectedAreaBlock,
+                      message: `⚠️ GPS mismatch ignored - uploading to Block ${selectedAreaBlock}`,
+                    });
+                    console.log(`[UploadMockup] User bypassed GPS mismatch - continuing with Block ${selectedAreaBlock}`);
+                  },
+                },
+              ].filter(Boolean)
+            );
+          }
         }
       } catch (error) {
         console.error('[UploadMockup] Error validating area:', error);
-        setAreaValidation({
-          isValid: false,
-          checked: true,
-          detectedBlock: null,
-          message: `❌ Validation error: ${error.message}`,
-        });
+
+        // Show error dialog with option to continue
+        Alert.alert(
+          'Validation Error',
+          `Failed to validate area: ${error.message}\n\nYou can still upload images using your selected Block ${selectedAreaBlock}.`,
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel',
+              onPress: () => {
+                setAreaValidation({
+                  isValid: false,
+                  checked: true,
+                  detectedBlock: null,
+                  message: `❌ Validation error: ${error.message}`,
+                });
+              },
+            },
+            {
+              text: 'Continue Anyway',
+              style: 'default',
+              onPress: () => {
+                // Allow upload despite error
+                setAreaValidation({
+                  isValid: true, // Force valid to allow upload
+                  checked: true,
+                  detectedBlock: selectedAreaBlock,
+                  message: `⚠️ Uploading to Block ${selectedAreaBlock} (validation error bypassed)`,
+                });
+                console.log(`[UploadMockup] User bypassed validation error - continuing with Block ${selectedAreaBlock}`);
+              },
+            },
+          ]
+        );
       } finally {
         setIsValidatingArea(false);
       }
@@ -211,26 +294,26 @@ export default function UploadMockup({
       return;
     }
 
-    // VALIDATION: User MUST select area block before upload (SOP requirement)
+    // VALIDATION: Area block is MANDATORY (always required)
     if (!selectedAreaBlock) {
       Alert.alert(
         'Area Block Required',
-        'Please select the area block for this upload session.\n\nSOP: Upload must be done per 1 block area at a time.',
+        'Please select the area block for this upload session before proceeding.',
         [{ text: 'OK' }]
       );
       return;
     }
 
     try {
-      console.log(`[Upload] Starting upload via context: ${selectedImages.length} images to area ${selectedAreaBlock}`);
+      console.log(`[Upload] Starting upload via context: ${selectedImages.length} images`);
+      console.log(`[Upload] Selected area block: ${selectedAreaBlock}`);
 
-      // FIX: Start upload via context - errors will be caught early
       // Pass session with selected area code to createUploadDetails for Monitoring screen
       const sessionWithArea = {
         ...session,
         drone: {
           ...session?.drone,
-          area_codes: [selectedAreaBlock], // Use selected area block
+          area_codes: [selectedAreaBlock], // Always has area block (mandatory)
         }
       };
       const result = await startUpload(selectedImages, sessionWithArea);
@@ -241,9 +324,10 @@ export default function UploadMockup({
 
       // Only show success alert if there are no errors
       if (errorCount === 0) {
+        const areaText = selectedAreaBlock ? ` ke Area ${selectedAreaBlock}` : '';
         Alert.alert(
           'Upload Berhasil! ✅',
-          `${successCount} gambar berhasil diupload ke Area ${selectedAreaBlock}.\n\nGambar akan segera diproses oleh AI untuk deteksi bird drops.`,
+          `${successCount} gambar berhasil diupload${areaText}.\n\nGambar akan segera diproses oleh AI untuk deteksi bird drops.`,
           [
             {
               text: 'OK',
@@ -972,9 +1056,18 @@ export default function UploadMockup({
         {selectedImages.length > 0 && !isUploading && (
           <TouchableOpacity
             onPress={uploadImages}
-            disabled={!selectedAreaBlock || (areaValidation.checked && !areaValidation.isValid) || isValidatingArea}
+            disabled={
+              !selectedAreaBlock ||
+              (areaValidation.checked && !areaValidation.isValid) ||
+              isValidatingArea
+            }
             style={{
-              backgroundColor: (!selectedAreaBlock || (areaValidation.checked && !areaValidation.isValid) || isValidatingArea) ? '#9CA3AF' : '#10B981',
+              backgroundColor:
+                !selectedAreaBlock ||
+                (areaValidation.checked && !areaValidation.isValid) ||
+                isValidatingArea
+                  ? '#9CA3AF'
+                  : '#10B981',
               paddingVertical: 18,
               borderRadius: 12,
               flexDirection: 'row',
@@ -982,12 +1075,22 @@ export default function UploadMockup({
               justifyContent: 'center',
               gap: 12,
               marginTop: 24,
-              shadowColor: (!selectedAreaBlock || (areaValidation.checked && !areaValidation.isValid) || isValidatingArea) ? '#6B7280' : '#10B981',
+              shadowColor:
+                !selectedAreaBlock ||
+                (areaValidation.checked && !areaValidation.isValid) ||
+                isValidatingArea
+                  ? '#6B7280'
+                  : '#10B981',
               shadowOffset: { width: 0, height: 6 },
               shadowOpacity: 0.4,
               shadowRadius: 10,
               elevation: 6,
-              opacity: (!selectedAreaBlock || (areaValidation.checked && !areaValidation.isValid) || isValidatingArea) ? 0.6 : 1,
+              opacity:
+                !selectedAreaBlock ||
+                (areaValidation.checked && !areaValidation.isValid) ||
+                isValidatingArea
+                  ? 0.6
+                  : 1,
             }}
           >
             {isValidatingArea ? (
