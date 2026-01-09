@@ -112,10 +112,10 @@ export default function UploadMockup({
         if (!validation.valid) {
           // Check if it's a backend error (404, 415, network error)
           const isBackendError = validation.error === 'validation_error' ||
-                                  validation.error === 'backend_validation_failed' ||
-                                  validation.message?.includes('404') ||
-                                  validation.message?.includes('415') ||
-                                  validation.message?.includes('Network');
+            validation.error === 'backend_validation_failed' ||
+            validation.message?.includes('404') ||
+            validation.message?.includes('415') ||
+            validation.message?.includes('Network');
 
           if (isBackendError) {
             // Backend error - allow user to continue anyway
@@ -331,7 +331,22 @@ export default function UploadMockup({
           [
             {
               text: 'OK',
-              onPress: () => {
+              onPress: async () => {
+                // Call UploadDetails API to update end_uploads count
+                try {
+                  const uploadDetailsPayload = {
+                    area_handle: selectedAreaBlock, // Backend expects string (single area)
+                    end_uploads: successCount, // Number of files successfully uploaded
+                  };
+
+                  console.log('[Upload] Calling UploadDetails API with payload:', uploadDetailsPayload);
+                  await apiService.uploadDetails(uploadDetailsPayload);
+                  console.log('[Upload] ✅ UploadDetails API called successfully');
+                } catch (error) {
+                  console.error('[Upload] ❌ Failed to call UploadDetails API:', error);
+                  // Don't block user flow if API fails - just log the error
+                }
+
                 setSelectedImages([]);
                 setSelectedAreaBlock(null); // Reset area selection for next upload
               }
@@ -403,100 +418,100 @@ export default function UploadMockup({
           borderBottomWidth: isDarkMode ? 1 : 0,
           borderColor: theme.border,
         }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={{ flexDirection: 'row', gap: 12, width }}>
-            <TouchableOpacity
-              onPress={() => handleNavigate('dashboard')}
-              style={{
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={{ flexDirection: 'row', gap: 12, width }}>
+              <TouchableOpacity
+                onPress={() => handleNavigate('dashboard')}
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 8,
+                  backgroundColor: 'transparent',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+              >
+                <Text style={{ fontSize: 18 }}>📊</Text>
+                <Text style={{ fontSize: 14, fontWeight: '500', color: theme.textSecondary }}>Dashboard</Text>
+              </TouchableOpacity>
+
+              <View style={{
                 flex: 1,
                 paddingVertical: 12,
                 paddingHorizontal: 16,
                 borderRadius: 8,
-                backgroundColor: 'transparent',
+                backgroundColor: '#0EA5E9',
                 flexDirection: 'row',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 8,
-              }}
-            >
-              <Text style={{ fontSize: 18 }}>📊</Text>
-              <Text style={{ fontSize: 14, fontWeight: '500', color: theme.textSecondary }}>Dashboard</Text>
-            </TouchableOpacity>
+                shadowColor: '#0EA5E9',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 8,
+                elevation: 4,
+              }}>
+                <Text style={{ fontSize: 18 }}>⬆️</Text>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFFFFF' }}>Upload</Text>
+              </View>
 
-            <View style={{
-              flex: 1,
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              borderRadius: 8,
-              backgroundColor: '#0EA5E9',
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              shadowColor: '#0EA5E9',
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.3,
-              shadowRadius: 8,
-              elevation: 4,
-            }}>
-              <Text style={{ fontSize: 18 }}>⬆️</Text>
-              <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFFFFF' }}>Upload</Text>
+              <TouchableOpacity
+                onPress={() => handleNavigate('cases')}
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 8,
+                  backgroundColor: 'transparent',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+              >
+                <Text style={{ fontSize: 18 }}>📋</Text>
+                <Text style={{ fontSize: 14, fontWeight: '500', color: theme.textSecondary }}>Cases</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => handleNavigate('monitoring')}
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: 8,
+                  backgroundColor: 'transparent',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                }}
+              >
+                <Text style={{ fontSize: 18 }}>📹</Text>
+                <Text style={{ fontSize: 14, fontWeight: '500', color: theme.textSecondary }}>Monitoring</Text>
+              </TouchableOpacity>
             </View>
 
             <TouchableOpacity
-              onPress={() => handleNavigate('cases')}
+              onPress={() => handleNavigate('documentations')}
               style={{
-                flex: 1,
                 paddingVertical: 12,
                 paddingHorizontal: 16,
                 borderRadius: 8,
                 backgroundColor: 'transparent',
                 flexDirection: 'row',
                 alignItems: 'center',
-                justifyContent: 'center',
                 gap: 8,
+                marginLeft: 12,
               }}
             >
-              <Text style={{ fontSize: 18 }}>📋</Text>
-              <Text style={{ fontSize: 14, fontWeight: '500', color: theme.textSecondary }}>Cases</Text>
+              <Text style={{ fontSize: 18 }}>📚</Text>
+              <Text style={{ fontSize: 14, fontWeight: '500', color: theme.textSecondary }}>Documentations</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => handleNavigate('monitoring')}
-              style={{
-                flex: 1,
-                paddingVertical: 12,
-                paddingHorizontal: 16,
-                borderRadius: 8,
-                backgroundColor: 'transparent',
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-              }}
-            >
-              <Text style={{ fontSize: 18 }}>📹</Text>
-              <Text style={{ fontSize: 14, fontWeight: '500', color: theme.textSecondary }}>Monitoring</Text>
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity
-            onPress={() => handleNavigate('documentations')}
-            style={{
-              paddingVertical: 12,
-              paddingHorizontal: 16,
-              borderRadius: 8,
-              backgroundColor: 'transparent',
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              marginLeft: 12,
-            }}
-          >
-            <Text style={{ fontSize: 18 }}>📚</Text>
-            <Text style={{ fontSize: 14, fontWeight: '500', color: theme.textSecondary }}>Documentations</Text>
-          </TouchableOpacity>
-        </ScrollView>
+          </ScrollView>
         </View>
       )}
 
@@ -1064,8 +1079,8 @@ export default function UploadMockup({
             style={{
               backgroundColor:
                 !selectedAreaBlock ||
-                (areaValidation.checked && !areaValidation.isValid) ||
-                isValidatingArea
+                  (areaValidation.checked && !areaValidation.isValid) ||
+                  isValidatingArea
                   ? '#9CA3AF'
                   : '#10B981',
               paddingVertical: 18,
@@ -1077,8 +1092,8 @@ export default function UploadMockup({
               marginTop: 24,
               shadowColor:
                 !selectedAreaBlock ||
-                (areaValidation.checked && !areaValidation.isValid) ||
-                isValidatingArea
+                  (areaValidation.checked && !areaValidation.isValid) ||
+                  isValidatingArea
                   ? '#6B7280'
                   : '#10B981',
               shadowOffset: { width: 0, height: 6 },
@@ -1087,8 +1102,8 @@ export default function UploadMockup({
               elevation: 6,
               opacity:
                 !selectedAreaBlock ||
-                (areaValidation.checked && !areaValidation.isValid) ||
-                isValidatingArea
+                  (areaValidation.checked && !areaValidation.isValid) ||
+                  isValidatingArea
                   ? 0.6
                   : 1,
             }}

@@ -408,6 +408,27 @@ export default function MonitoringMockup({
             totalProcessed += apiDetected;
           }
         });
+
+        // ========================================
+        // FRONTEND-AS-BRIDGE: Sync detected counts to Backend
+        // Since cluster cannot hit public Bird Drop API, frontend pushes detection counts
+        // Uses PATCH /UploadDetails/detection endpoint
+        // Includes operator from session for proper backend query
+        // ========================================
+        const operatorCode = session?.drone?.drone_code || null;
+        birdDropsResponse.data.forEach((block) => {
+          const areaCode = block.area_code;
+          const trueDetection = block.true_detection || 0;
+          const falseDetection = block.false_detection || 0;
+          const totalDetected = trueDetection + falseDetection;
+
+          if (areaCode && totalDetected > 0) {
+            // Fire and forget - background sync with operator
+            apiService.updateDetectionCounts(areaCode, totalDetected, operatorCode)
+              .then(() => console.log(`[MonitoringMockup] ✅ Synced Block ${areaCode}: ${totalDetected} detected`))
+              .catch(e => console.log(`[MonitoringMockup] ⚠️ Sync failed for ${areaCode}:`, e.message));
+          }
+        });
       }
 
       console.log('[MonitoringMockup] 🎯 Detection Counts (Pusher + API fallback):', detectionCounts);

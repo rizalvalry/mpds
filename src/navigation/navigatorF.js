@@ -34,7 +34,22 @@ export default function AppNavigator() {
         const refreshToken = await AsyncStorage.getItem('refresh_token');
 
         if (accessToken && refreshToken) {
-          setSession({ session_token: accessToken, refresh_token: refreshToken });
+          // Load full login response to preserve area_code and other pilot data
+          const loginResponseStr = await AsyncStorage.getItem('login_response');
+          if (loginResponseStr) {
+            try {
+              const fullSession = JSON.parse(loginResponseStr);
+              console.log('[Navigator] Restored full session with area_code:', fullSession.area_code);
+              setSession(fullSession);
+            } catch (parseError) {
+              // Fallback to basic session if parse fails
+              console.warn('[Navigator] Could not parse login_response, using basic session');
+              setSession({ session_token: accessToken, refresh_token: refreshToken });
+            }
+          } else {
+            // No login_response stored, use basic session
+            setSession({ session_token: accessToken, refresh_token: refreshToken });
+          }
         }
       } catch (error) {
         console.error('[Navigator] Error loading session:', error);
@@ -58,15 +73,15 @@ export default function AppNavigator() {
         key={session ? 'app' : 'auth'}
         screenOptions={{ headerShown: false }}
       >
-      {session ? (
-      <Stack.Screen name="Drone Frontend">
-        {(props) => <DashboardScreen {...props} session={session} setSession={setSession} />}
-      </Stack.Screen>
-      ) : (
-      <Stack.Screen name="Login">
-        {(props) => <LoginScreen {...props} setSession={setSession} />}
-      </Stack.Screen>
-      )}
+        {session ? (
+          <Stack.Screen name="Drone Frontend">
+            {(props) => <DashboardScreen {...props} session={session} setSession={setSession} />}
+          </Stack.Screen>
+        ) : (
+          <Stack.Screen name="Login">
+            {(props) => <LoginScreen {...props} setSession={setSession} />}
+          </Stack.Screen>
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

@@ -579,18 +579,10 @@ export class ApiService {
   async getDashboardBDPerBlock(type, areaCodes = null) {
     await this.init(); // Ensure tokens are loaded
 
-    // Manual URL construction to handle List<string> query params correctly
-    // ASP.NET Core expects ?areaCodes=A&areaCodes=B for List<string> binding
-    let url = `${this.endpoints.dashboardBDPerBlock}?type=${type}`;
+    // Fetch ALL data without filtering - client will filter locally
+    const url = this.buildUrl(`${this.endpoints.dashboardBDPerBlock}?type=${type}`);
 
-    // Add areaCodes filter
-    if (areaCodes && Array.isArray(areaCodes) && areaCodes.length > 0) {
-      areaCodes.forEach(code => {
-        url += `&areaCodes=${encodeURIComponent(code)}`;
-      });
-    }
-
-    console.log('[ApiService] 📊 getDashboardBDPerBlock URL:', url);
+    console.log(`[ApiService] 📊 getDashboardBDPerBlock URL: ${url} (fetch all, filter client-side)`);
     return this.fetchData({ method: 'GET', url });
   }
 
@@ -614,6 +606,69 @@ export class ApiService {
       method: 'POST',
       url,
       body,
+    });
+  }
+
+  async uploadDetails(data) {
+    await this.init(); // Ensure tokens are loaded
+    const url = 'https://droneark.bsi.co.id/services/cases/api/UploadDetails';
+
+    console.log('[ApiService] 📤 Calling UploadDetails API:', { url, data });
+
+    return this.fetchData({
+      method: 'POST',
+      url,
+      body: data,
+    });
+  }
+
+  /**
+   * ✅ NEW: Update detection counts (detected/undetected) via PATCH endpoint
+   * Used by Frontend-as-Bridge pattern to sync detected counts from Bird Drop API
+   * 
+   * @param {string} areaCode - Block area code (e.g., 'A', 'H')
+   * @param {number} totalDetected - Total detected count from Bird Drop API
+   * @param {string} operator - Optional operator/drone code from session (e.g., 'Drone-001')
+   * @param {number} totalUndetected - Optional undetected count (usually from worker)
+   */
+  async updateDetectionCounts(areaCode, totalDetected, operator = null, totalUndetected = null) {
+    await this.init();
+    const url = 'https://droneark.bsi.co.id/services/cases/api/UploadDetails/detection';
+
+    const body = {
+      area_code: areaCode,
+      total_detected: totalDetected,
+    };
+
+    // Include operator if provided (for proper backend query)
+    if (operator) {
+      body.operator = operator;
+    }
+
+    if (totalUndetected !== null) {
+      body.total_undetected = totalUndetected;
+    }
+
+    console.log('[ApiService] 🔄 Sync detection counts:', { url, body });
+
+    return this.fetchData({
+      method: 'PATCH',
+      url,
+      body,
+    });
+  }
+
+  // ✅ NEW: Fetch UploadDetails for IN PROGRESS panel (replaces Pusher)
+  async getUploadDetails(date) {
+    await this.init(); // Ensure tokens are loaded
+    // Matches exact URL format requested by user
+    const url = `https://droneark.bsi.co.id/services/cases/api/UploadDetails?createdAt=${date}`;
+
+    console.log('[ApiService] 📥 getUploadDetails:', url);
+
+    return this.fetchData({
+      method: 'GET',
+      url
     });
   }
 

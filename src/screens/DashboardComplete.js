@@ -92,6 +92,27 @@ export default function DashboardComplete({ session }) {
     elevation: isDarkMode ? 0 : 4,
   }), [theme, isDarkMode]);
 
+  // Filter Bird Drop Per Block data based on pilot's area_code from login session
+  const filteredBdPerBlock = useMemo(() => {
+    if (!dashboardBdPerBlock || dashboardBdPerBlock.length === 0) return [];
+
+    // Get area_code from session (pilot's assigned blocks)
+    // Login response has: session.area_code = ["A", "B", "C", ...]
+    const userAreaCodes = session?.area_code;
+
+    // If user has area_code, filter by them; otherwise show all
+    if (userAreaCodes && Array.isArray(userAreaCodes) && userAreaCodes.length > 0) {
+      console.log('[Dashboard] Filtering BD Per Block by pilot area_code:', userAreaCodes);
+      return dashboardBdPerBlock.filter(block =>
+        userAreaCodes.includes(block.area_code)
+      );
+    }
+
+    // No filter - show all blocks (admin/viewer role)
+    console.log('[Dashboard] No area_code filter, showing all blocks');
+    return dashboardBdPerBlock;
+  }, [dashboardBdPerBlock, session]);
+
   useEffect(() => {
     loadDashboardData();
   }, [selectedFilter]);
@@ -113,20 +134,13 @@ export default function DashboardComplete({ session }) {
       }
 
       // Fetch all dashboard data dari API seperti Flutter
-      // Get user's area_codes for pilot group filtering
-      const userAreaCodes = session?.area_code || [];
-      console.log('[DashboardComplete] 🔑 Session received:', session ? 'YES' : 'NO');
-      console.log('[DashboardComplete] 🔑 Session username:', session?.username);
-      console.log('[DashboardComplete] 📊 User area_codes:', userAreaCodes);
-      console.log('[DashboardComplete] 📊 Will filter by:', userAreaCodes.length > 0 ? userAreaCodes.join(',') : 'ALL BLOCKS (no filter)');
 
       const [overviewRes, statusRes, workerRes, bdRes, bdPerBlockRes] = await Promise.all([
         apiService.getDashboardOverview(),
         apiService.getDashboardStatus(selectedFilter),
         apiService.getDashboardWorker(selectedFilter),
         apiService.getDashboardData(selectedFilter, startDate, endDate),
-        // Pass areaCodes to filter bird_drops_by_block by pilot's blocks
-        apiService.getDashboardBDPerBlock(selectedFilter, userAreaCodes.length > 0 ? userAreaCodes : null),
+        apiService.getDashboardBDPerBlock(selectedFilter),
       ]);
 
       console.log('Dashboard Overview:', overviewRes);
@@ -255,13 +269,13 @@ export default function DashboardComplete({ session }) {
     })).filter(item => item.population > 0);
   };
 
-  // Prepare BD Confirm Per Block Pie Chart Data
+  // Prepare BD Confirm Per Block Pie Chart Data (uses filtered data)
   const getBDConfirmPerBlockPieData = () => {
-    if (!dashboardBdPerBlock || dashboardBdPerBlock.length === 0) return [];
+    if (!filteredBdPerBlock || filteredBdPerBlock.length === 0) return [];
 
     const colors = ['#10B981', '#F59E0B', '#0EA5E9', '#8B5CF6', '#F97316', '#14B8A6', '#EF4444', '#EC4899'];
 
-    return dashboardBdPerBlock.map((block, index) => ({
+    return filteredBdPerBlock.map((block, index) => ({
       name: `Block ${block.area_code}`,
       population: block.total || 0,
       color: colors[index % colors.length],
@@ -670,7 +684,7 @@ export default function DashboardComplete({ session }) {
               }
             ]}>
               <Text style={[styles.chartTitle, { color: theme.textPrimary }]}>Bird Drop Per Block</Text>
-              {dashboardBdPerBlock && dashboardBdPerBlock.length > 0 ? (
+              {filteredBdPerBlock && filteredBdPerBlock.length > 0 ? (
                 <View style={styles.tableContainer}>
                   {/* Header Row */}
                   <View style={[styles.tableHeader, { borderColor: theme.border }]}>
@@ -687,7 +701,7 @@ export default function DashboardComplete({ session }) {
                     nestedScrollEnabled
                     showsVerticalScrollIndicator={false}
                   >
-                    {dashboardBdPerBlock.map((item, index) => {
+                    {filteredBdPerBlock.map((item, index) => {
                       const lightColors = ['#F3E8FF', '#E8FFF3', '#E8F1FF', '#FFF7E8'];
                       const darkColors = ['rgba(59,130,246,0.18)', 'rgba(16,185,129,0.18)', 'rgba(125,211,252,0.18)', 'rgba(249,115,22,0.18)'];
                       const palette = isDarkMode ? darkColors : lightColors;

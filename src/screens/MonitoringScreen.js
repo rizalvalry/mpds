@@ -31,8 +31,8 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
   const [lastUpdateTime, setLastUpdateTime] = useState(null);
 
   // Real-time progress from pusher (aggregate count per block)
-  // Format: { 'A': { detected: 50, undetected: 30, total_processed: 80 }, 'B': {...} }
-  const [pusherProgress, setPusherProgress] = useState({});
+  // DEPRECATED: Pusher block-progress removed. Using API polling instead.
+  // const [pusherProgress, setPusherProgress] = useState({});
 
   // Detection timeline tracking (prevent duplicate API calls)
   // Format: { 'A': { started: true, completed: false }, 'B': {...} }
@@ -92,140 +92,36 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
     }
   }, [loading]);
 
-  // Pusher listener for real-time progress updates (aggregate batches)
+  // Pusher listener for UNDETECTED ALERTS only (Channel: monitoring)
   useEffect(() => {
-    console.log('[Monitoring] Initializing pusher for block-progress events...');
+    console.log('[Monitoring] Initializing pusher for monitoring/undetected alerts...');
 
-    // Subscribe to block-progress channel
-    const progressChannel = PusherService.subscribe('block-progress');
+    // Subscribe to monitoring channel (global alerts)
+    const monitoringChannel = PusherService.subscribe('monitoring');
 
-    // Bind event handler for aggregate progress updates
-    progressChannel.bind('block-progress', async (data) => {
-      console.log('[Monitoring] 📩 Received block-progress event:', data);
+    // Bind event handler for DETECTED/UNDETECTED alerts
+    monitoringChannel.bind('undetected_alert', (data) => {
+      console.log('[Monitoring] 🚨 Received UNDETECTED alert:', data);
 
       const areaCode = data.area_code;
-      const detectedCount = data.detected_count || 0;
-      const undetectedCount = data.undetected_count || 0;
-      const totalProcessed = data.total_processed || 0;
-      const isFirstFile = data.is_first_file || false;  // NEW FLAG
-      const isFinal = data.is_final || false;           // NEW FLAG
+      const undetectedCount = data.undetected_count;
 
-      if (areaCode) {
-        // SET progress (not increment) - this avoids lost events issue
-        setPusherProgress((prev) => ({
-          ...prev,
-          [areaCode]: {
-            detected: detectedCount,
-            undetected: undetectedCount,
-            total_processed: totalProcessed,
-            is_complete: isFinal,  // Track completion status
-          },
-        }));
-
-        console.log(`[Monitoring] Updated progress for Block ${areaCode}:`, {
-          detected: detectedCount,
-          undetected: undetectedCount,
-          total_processed: totalProcessed,
-          is_first_file: isFirstFile,
-          is_final: isFinal,
-        });
-
-        // ========================================
-        // DETECTION STARTED: Mark via API
-        // ========================================
-        if (isFirstFile) {
-          setDetectionTimeline((prev) => {
-            // Check if already marked (prevent duplicate calls)
-            if (prev[areaCode]?.started) {
-              console.log(`[Monitoring] Detection already started for Block ${areaCode}, skipping API call`);
-              return prev;
-            }
-
-            console.log(`[Monitoring] 🚀 First file detected for Block ${areaCode}! Marking detection started...`);
-
-            // Call API in background (don't block UI)
-            (async () => {
-              try {
-                const currentSession = await getSession();
-                const operator = currentSession?.drone?.drone_code || droneCode || 'Unknown';
-
-                const success = await markDetectionStarted(operator, areaCode);
-
-                if (success) {
-                  console.log(`[Monitoring] ✅ Detection started tracked for Block ${areaCode}`);
-                  setDetectionTimeline((prev2) => ({
-                    ...prev2,
-                    [areaCode]: { ...prev2[areaCode], started: true },
-                  }));
-                }
-              } catch (error) {
-                console.error('[Monitoring] ⚠️ Failed to mark detection start:', error);
-              }
-            })();
-
-            return {
-              ...prev,
-              [areaCode]: { ...prev[areaCode], started: false }, // Will be updated to true on success
-            };
-          });
-        }
-
-        // ========================================
-        // DETECTION COMPLETED: Mark via API
-        // ========================================
-        if (isFinal) {
-          setDetectionTimeline((prev) => {
-            // Check if already marked (prevent duplicate calls)
-            if (prev[areaCode]?.completed) {
-              console.log(`[Monitoring] Detection already completed for Block ${areaCode}, skipping API call`);
-              return prev;
-            }
-
-            console.log(`[Monitoring] 🎉 Final update for Block ${areaCode}! Marking detection completed...`);
-
-            // Call API in background (don't block UI)
-            (async () => {
-              try {
-                const currentSession = await getSession();
-                const operator = currentSession?.drone?.drone_code || droneCode || 'Unknown';
-
-                const success = await markDetectionCompleted(
-                  operator,
-                  areaCode,
-                  detectedCount,
-                  undetectedCount
-                );
-
-                if (success) {
-                  console.log(`[Monitoring] ✅ Detection completed tracked for Block ${areaCode}`);
-                  console.log(`[Monitoring] Total: ${detectedCount} detected, ${undetectedCount} undetected`);
-
-                  setDetectionTimeline((prev2) => ({
-                    ...prev2,
-                    [areaCode]: { ...prev2[areaCode], completed: true },
-                  }));
-                }
-              } catch (error) {
-                console.error('[Monitoring] ⚠️ Failed to mark detection completion:', error);
-              }
-            })();
-
-            return {
-              ...prev,
-              [areaCode]: { ...prev[areaCode], completed: false }, // Will be updated to true on success
-            };
-          });
-        }
+      // Show toaster/alert to user
+      if (areaCode && undetectedCount > 0) {
+        // You might want to use a Toast component here instead of Alert
+        // For now, fast refresh the data to show latest status
+        console.log(`[Monitoring] Triggering refresh due to undetected alert in Block ${areaCode}`);
+        fetchStatsFromAPI();
       }
     });
 
     // Cleanup: Unbind and unsubscribe on unmount
     return () => {
       console.log('[Monitoring] Cleaning up pusher subscriptions...');
-      progressChannel.unbind('block-progress');
-      PusherService.unsubscribe('block-progress');
+      monitoringChannel.unbind('undetected_alert');
+      PusherService.unsubscribe('monitoring');
     };
-  }, [droneCode]);
+  }, []);
 
   // Helper: Get today's date in YYYY-MM-DD format (Asia/Jakarta timezone)
   const getTodayDate = useCallback(() => {
@@ -239,77 +135,69 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
     return jakartaDateString.split(',')[0];
   }, []);
 
-  // Transform data: UploadDetails (total) + Pusher (real-time progress)
-  // HYBRID: UploadDetails for total, Pusher for real-time detected/undetected counts
+  // Transform data: Use UploadDetails DIRECTLY for progress
+  // SIMPLIFIED: Fetch from API, trust the DB counts (synced by watcher/worker)
   const transformAPIDataToBlockProgress = useCallback((birdDropsData, uploadDetailsData) => {
     try {
       const inProgress = [];
       const complete = [];
       const now = new Date();
 
-      // Create map of total uploaded per block from UploadDetails (with created_at tracking)
-      const uploadedPerBlock = {};
+      // Process each upload session from UploadDetails
       uploadDetailsData.forEach((session) => {
-        const areaHandle = session.area_handle; // Now string format from backend
-        const startUploads = session.start_uploads || 0;
+        const areaCode = session.area_handle;
+        const totalUploaded = session.start_uploads || 0;
+
+        // Progress counts
+        // DETECTED: Use fresh data from Bird Drop API (birdDropsData), fallback to DB
+        const bdBlock = birdDropsData.find(b => b.area_code === areaCode);
+        const bdDetected = bdBlock ? (bdBlock.true_detection || 0) + (bdBlock.false_detection || 0) : 0;
+        const detectedCount = bdDetected > 0 ? bdDetected : (session.total_detected || 0);
+
+        // UNDETECTED: From DB (updated by worker)
+        const undetectedCount = session.total_undetected || 0;
+        const totalProcessed = detectedCount + undetectedCount;
+
         const createdAt = session.created_at ? new Date(session.created_at) : null;
-
-        if (areaHandle) {
-          if (!uploadedPerBlock[areaHandle]) {
-            uploadedPerBlock[areaHandle] = {
-              total: 0,
-              oldestCreatedAt: createdAt
-            };
-          }
-          uploadedPerBlock[areaHandle].total += startUploads;
-
-          // Track oldest created_at for this area
-          if (createdAt && (!uploadedPerBlock[areaHandle].oldestCreatedAt || createdAt < uploadedPerBlock[areaHandle].oldestCreatedAt)) {
-            uploadedPerBlock[areaHandle].oldestCreatedAt = createdAt;
-          }
-        }
-      });
-
-      // Process each block that has uploads
-      Object.keys(uploadedPerBlock).forEach((areaCode) => {
-        const totalUploaded = uploadedPerBlock[areaCode].total;
-        const createdAt = uploadedPerBlock[areaCode].oldestCreatedAt;
-
-        // Get real-time progress from pusher (if available)
-        const pusherData = pusherProgress[areaCode];
-        const detectedCount = pusherData?.detected || 0;
-        const undetectedCount = pusherData?.undetected || 0;
-        let totalProcessed = pusherData?.total_processed || 0;
+        let isComplete = session.status === 'completed';
 
         // ========================================
-        // AUTO-COMPLETE: If detection running > 60 minutes, force 100% complete
+        // AUTO-COMPLETE CHECK (Client-side backup)
+        // If detection running > 60 minutes, treat as complete
         // ========================================
         let autoCompleted = false;
-        if (createdAt) {
-          const elapsedMinutes = (now - createdAt) / 1000 / 60; // Convert to minutes
-
+        if (createdAt && !isComplete) {
+          const elapsedMinutes = (now - createdAt) / 1000 / 60;
           if (elapsedMinutes >= 60 && totalProcessed < totalUploaded) {
-            console.log(`[Monitoring] ⏱️ Block ${areaCode}: Detection running for ${Math.round(elapsedMinutes)} minutes (>60 min threshold)`);
-            console.log(`[Monitoring] 🔄 Auto-completing Block ${areaCode}: ${totalProcessed}/${totalUploaded} → ${totalUploaded}/${totalUploaded} (100%)`);
-            totalProcessed = totalUploaded; // Force 100% complete
+            // Forced completion locally for display
+            isComplete = true;
             autoCompleted = true;
           }
         }
 
+        // Also consider complete if processed >= uploaded
+        if (totalProcessed >= totalUploaded && totalUploaded > 0) {
+          isComplete = true;
+        }
+
+        if (!areaCode) return;
+
         const blockData = {
           area: areaCode,
-          processed: totalProcessed,        // From pusher (real-time worker progress) or auto-completed
-          total: totalUploaded,             // From UploadDetails (user uploaded count)
-          detectedCount: detectedCount,     // From pusher (real-time detected count)
-          undetectedCount: undetectedCount, // From pusher (real-time undetected count)
-          autoCompleted: autoCompleted,     // Flag if auto-completed due to 60min timeout
+          processed: autoCompleted ? totalUploaded : totalProcessed,
+          total: totalUploaded,
+          detectedCount: detectedCount,
+          undetectedCount: undetectedCount,
+          autoCompleted: autoCompleted,
         };
 
-        console.log(`[Monitoring] Block ${areaCode}: ${totalProcessed}/${totalUploaded} (${detectedCount} detected, ${undetectedCount} undetected) [Pusher: ${pusherData ? 'YES' : 'NO'}] [AutoComplete: ${autoCompleted ? 'YES' : 'NO'}]`);
+        console.log(`[Monitoring] Block ${areaCode}: ${blockData.processed}/${totalUploaded} ` +
+          `(${detectedCount} det, ${undetectedCount} undet) ` +
+          `[Status: ${session.status}]`);
 
-        // Categorize as complete or in progress
+        // Categorize
         if (totalUploaded > 0) {
-          if (totalProcessed >= totalUploaded) {
+          if (isComplete) {
             complete.push(blockData);
           } else {
             inProgress.push(blockData);
@@ -325,13 +213,11 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
       console.log('[Monitoring] Block progress updated:', {
         inProgressCount: inProgress.length,
         completeCount: complete.length,
-        inProgress,
-        complete,
       });
     } catch (error) {
       console.error('[Monitoring] Error transforming API data:', error);
     }
-  }, [pusherProgress]);
+  }, []);
 
   // Fetch monitoring statistics from API (Bird Drop Per Block endpoint + UploadDetails)
   const fetchStatsFromAPI = useCallback(async () => {
@@ -360,6 +246,17 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
       birdDropsData.forEach((block) => {
         totalInSystem += block.total || 0;
         totalDetected += (block.true_detection || 0) + (block.false_detection || 0);
+      });
+
+      // SYNC DETECTED COUNTS TO BACKEND (Frontend-as-Bridge)
+      // Uses PATCH /UploadDetails/detection endpoint for proper update
+      birdDropsData.forEach(block => {
+        const blkDetected = (block.true_detection || 0) + (block.false_detection || 0);
+        if (block.area_code && blkDetected > 0) {
+          // Fire and forget - background sync using correct PATCH endpoint
+          apiService.updateDetectionCounts(block.area_code, blkDetected)
+            .catch(e => console.log(`[Monitoring] Sync failed for ${block.area_code}:`, e.message));
+        }
       });
 
       // Calculate metrics from UploadDetails
