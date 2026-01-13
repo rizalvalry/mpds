@@ -37,6 +37,64 @@ export const UploadProvider = ({ children }) => {
     try {
       console.log(`[UploadContext] Starting batch upload: ${images.length} images in ${totalBatchCount} batches`);
 
+<<<<<<< Updated upstream
+=======
+      // Create upload details entry in backend for Monitoring screen
+      if (session?.drone) {
+        // Ensure area_codes is always an array for backend services
+        const areaHandle = Array.isArray(session.drone.area_codes)
+          ? session.drone.area_codes
+          : session.drone.area_codes ? [session.drone.area_codes] : [];
+
+        const uploadDetailsPayload = {
+          operator: session.drone.drone_code || 'UNKNOWN',
+          status: 'active',
+          startUploads: images.length,
+          endUploads: 0,
+          areaHandle: areaHandle, // Send as array, e.g., ["C"] or ["D"]
+        };
+
+        console.log(`[UploadContext] ========================================`);
+        console.log(`[UploadContext] Creating upload details for backend.worker`);
+        console.log(`[UploadContext] Payload:`, uploadDetailsPayload);
+        console.log(`[UploadContext] areaHandle type:`, Array.isArray(areaHandle) ? `array[${areaHandle.length}]` : typeof areaHandle);
+        console.log(`[UploadContext] areaHandle value:`, JSON.stringify(areaHandle));
+        console.log(`[UploadContext] ========================================`);
+
+        try {
+          const uploadDetailsResult = await apiService.createUploadDetails(uploadDetailsPayload);
+          if (uploadDetailsResult.success) {
+            console.log(`[UploadContext] ✅ Upload details created successfully!`);
+            console.log(`[UploadContext] 📋 Session ID: ${uploadDetailsResult.id || 'N/A'}`);
+            console.log(`[UploadContext] 📍 Area: ${areaHandle.join(', ')}`);
+            console.log(`[UploadContext] 📊 Total images: ${images.length}`);
+            console.log(`[UploadContext] 🔄 Worker should now process these images and send Pusher events`);
+          } else {
+            console.warn(`[UploadContext] ❌ Failed to create upload details:`, uploadDetailsResult.message);
+          }
+        } catch (detailsError) {
+          console.warn(`[UploadContext] ❌ Error creating upload details:`, detailsError);
+          // Don't block upload if this fails
+        }
+      } else {
+        console.warn(`[UploadContext] ⚠️ No session/drone data available, skipping upload details creation`);
+      }
+
+      // Extract area code for subfolder routing
+      // Use first area from session (e.g., "A", "K", "Y")
+      const areaCode = session?.drone?.area_codes
+        ? (Array.isArray(session.drone.area_codes)
+          ? session.drone.area_codes[0]
+          : session.drone.area_codes)
+        : null;
+
+      if (areaCode) {
+        console.log(`[UploadContext] 📁 Using areaCode for subfolder routing: ${areaCode}`);
+      } else {
+        console.log(`[UploadContext] ⚠️ No areaCode - files will go to default input/ folder`);
+      }
+
+>>>>>>> Stashed changes
       const result = await chunkedUploadService.uploadBatch(
         images,
         BATCH_SIZE,
@@ -57,7 +115,10 @@ export const UploadProvider = ({ children }) => {
               [batchIndex]: progress
             }));
           }
-        }
+        },
+        null,     // uuid - will be auto-generated
+        null,     // userid - will be retrieved from session
+        areaCode  // NEW: Pass areaCode for subfolder routing
       );
 
       // Update stats

@@ -15,7 +15,7 @@ const PROD_BASE_URL = 'droneark.bsi.co.id';
  * Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
  */
 function generateUUID() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = Math.random() * 16 | 0;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
@@ -51,8 +51,9 @@ export class ChunkedUploadService {
    * @param {function} onProgress - Progress callback
    * @param {string} uuid - UUID for organizing uploads (optional, required for development)
    * @param {string} userid - User ID (optional, required for development)
+   * @param {string} areaCode - Area code for subfolder routing (e.g., 'A', 'K', 'Y')
    */
-  async uploadChunk(chunkBlob, fileId, chunkIndex, totalChunks, originalName, onProgress, uuid = null, userid = null) {
+  async uploadChunk(chunkBlob, fileId, chunkIndex, totalChunks, originalName, onProgress, uuid = null, userid = null, areaCode = null) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
@@ -130,6 +131,12 @@ export class ChunkedUploadService {
       }
       if (userid) {
         formData.append('userid', String(userid));
+      }
+
+      // Area code for subfolder routing (e.g., input/A/, input/B/)
+      if (areaCode) {
+        formData.append('area_code', String(areaCode).toUpperCase());
+        console.log(`[ChunkUpload] area_code: ${areaCode.toUpperCase()}`);
       }
 
       xhr.open('POST', this.uploadUrl);
@@ -221,8 +228,9 @@ export class ChunkedUploadService {
    * @param {function} onProgress - Progress callback (0-100)
    * @param {string} uuid - UUID for organizing uploads (optional, required for production chunking)
    * @param {string} userid - User ID (optional, required for production chunking)
+   * @param {string} areaCode - Area code for subfolder routing (e.g., 'A', 'K', 'Y')
    */
-  async uploadFileChunked(file, onProgress, uuid = null, userid = null) {
+  async uploadFileChunked(file, onProgress, uuid = null, userid = null, areaCode = null) {
     await this.init(); // Initialize
 
     // Use direct upload for development, chunking for production
@@ -253,6 +261,7 @@ export class ChunkedUploadService {
     console.log(`[ChunkUpload] Size: ${file.size || 'unknown'} bytes`);
     console.log(`[ChunkUpload] File ID: ${fileId}`);
     console.log(`[ChunkUpload] Total chunks: ${totalChunks}`);
+    console.log(`[ChunkUpload] Area Code: ${areaCode || 'default (flat folder)'}`);
     console.log(`[ChunkUpload] ========================================`);
 
     try {
@@ -268,8 +277,9 @@ export class ChunkedUploadService {
             onProgress(chunkProgress);
           }
         },
-        uuid,    // Pass uuid to uploadChunk
-        userid   // Pass userid to uploadChunk
+        uuid,      // Pass uuid to uploadChunk
+        userid,    // Pass userid to uploadChunk
+        areaCode   // Pass areaCode for subfolder routing
       );
 
       console.log(`[ChunkUpload] File ${file.fileName} uploaded successfully`);
@@ -289,8 +299,9 @@ export class ChunkedUploadService {
    * @param {function} onFileProgress - Per-file progress callback
    * @param {string} uuid - UUID for organizing uploads (only for production chunking)
    * @param {string} userid - User ID (only for production chunking)
+   * @param {string} areaCode - Area code for subfolder routing (e.g., 'A', 'K', 'Y')
    */
-  async uploadBatch(files, batchSize = 8, onBatchProgress, onFileProgress, uuid = null, userid = null) {
+  async uploadBatch(files, batchSize = 8, onBatchProgress, onFileProgress, uuid = null, userid = null, areaCode = null) {
     const results = [];
     const batches = [];
 
@@ -332,6 +343,7 @@ export class ChunkedUploadService {
     }
 
     console.log(`[ChunkUpload] Starting batch upload: ${files.length} files in ${batches.length} batches`);
+    console.log(`[ChunkUpload] Area Code: ${areaCode || 'default (flat folder)'}`);
 
     // FIX: Test upload first file to detect errors early
     if (files.length > 0) {
@@ -341,7 +353,7 @@ export class ChunkedUploadService {
           if (onFileProgress) {
             onFileProgress(files[0].id, progress, files[0].fileName);
           }
-        }, uuid, userid);  // Pass uuid and userid
+        }, uuid, userid, areaCode);  // Pass uuid, userid, and areaCode
         console.log(`[ChunkUpload] ✅ Test upload successful: ${files[0].fileName}`);
         results.push({ success: true, file: files[0], result: testResult });
       } catch (error) {
@@ -354,10 +366,10 @@ export class ChunkedUploadService {
     // Process remaining files in batches
     for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
       const batch = batches[batchIndex];
-      
+
       // Skip first file if it's already uploaded (test upload)
       const filesToUpload = batchIndex === 0 ? batch.slice(1) : batch;
-      
+
       if (filesToUpload.length === 0) {
         continue; // Skip empty batch
       }
@@ -379,7 +391,7 @@ export class ChunkedUploadService {
             if (onFileProgress) {
               onFileProgress(file.id, progress, file.fileName);
             }
-          }, uuid, userid);  // Pass uuid and userid
+          }, uuid, userid, areaCode);  // Pass uuid, userid, and areaCode
 
           console.log(`[ChunkUpload] Success: ${file.fileName}`);
           return { success: true, file, result };

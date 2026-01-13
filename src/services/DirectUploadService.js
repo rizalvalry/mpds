@@ -22,8 +22,9 @@ export class DirectUploadService {
    * Upload single file directly to blob storage
    * @param {object} file - File object with uri, fileName, size, type
    * @param {function} onProgress - Progress callback (0-100)
+   * @param {string} areaCode - Optional area code for routing (e.g., 'A', 'K', 'Y')
    */
-  async uploadFileDirect(file, onProgress) {
+  async uploadFileDirect(file, onProgress, areaCode = null) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
@@ -39,7 +40,7 @@ export class DirectUploadService {
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const response = xhr.responseText ? JSON.parse(xhr.responseText) : { success: true };
-            console.log(`[DirectUpload] ✅ File ${file.fileName} uploaded successfully`);
+            console.log(`[DirectUpload] ✅ File ${file.fileName} uploaded successfully to area ${areaCode || 'default'}`);
             resolve(response);
           } catch (error) {
             console.log(`[DirectUpload] File ${file.fileName} uploaded (empty response)`);
@@ -68,17 +69,25 @@ export class DirectUploadService {
         name: file.fileName,
       });
 
+      // Build URL with area_code query parameter if provided
+      let uploadUrl = this.uploadUrl;
+      if (areaCode) {
+        uploadUrl = `${this.uploadUrl}?area_code=${encodeURIComponent(areaCode.toUpperCase())}`;
+      }
+
       console.log(`[DirectUpload] ========================================`);
       console.log(`[DirectUpload] Uploading file directly to blob storage`);
-      console.log(`[DirectUpload] URL: ${this.uploadUrl}`);
+      console.log(`[DirectUpload] URL: ${uploadUrl}`);
       console.log(`[DirectUpload] File: ${file.fileName}`);
       console.log(`[DirectUpload] Size: ${file.size || 'unknown'} bytes`);
+      console.log(`[DirectUpload] Area: ${areaCode || 'default (no routing)'}`);
       console.log(`[DirectUpload] ========================================`);
 
-      xhr.open('POST', this.uploadUrl);
+      xhr.open('POST', uploadUrl);
       xhr.send(formData);
     });
   }
+
 
   /**
    * Batch upload with direct method
@@ -86,8 +95,9 @@ export class DirectUploadService {
    * @param {number} batchSize - Number of files to upload in parallel
    * @param {function} onBatchProgress - Batch progress callback
    * @param {function} onFileProgress - Per-file progress callback
+   * @param {string} areaCode - Optional area code for routing (e.g., 'A', 'K', 'Y')
    */
-  async uploadBatch(files, batchSize = 8, onBatchProgress, onFileProgress) {
+  async uploadBatch(files, batchSize = 8, onBatchProgress, onFileProgress, areaCode = null) {
     const results = [];
     const batches = [];
 
@@ -98,6 +108,7 @@ export class DirectUploadService {
 
     console.log(`[DirectUpload] Starting batch upload: ${files.length} files in ${batches.length} batches`);
     console.log(`[DirectUpload] Method: DIRECT (to blob storage input folder)`);
+    console.log(`[DirectUpload] Area Code: ${areaCode || 'default (no routing)'}`);
 
     // Test upload first file to detect errors early
     if (files.length > 0) {
@@ -107,7 +118,7 @@ export class DirectUploadService {
           if (onFileProgress) {
             onFileProgress(files[0].id, progress, files[0].fileName);
           }
-        });
+        }, areaCode);  // Pass areaCode to test upload
         console.log(`[DirectUpload] ✅ Test upload successful: ${files[0].fileName}`);
         results.push({ success: true, file: files[0], result: testResult });
       } catch (error) {
@@ -144,7 +155,7 @@ export class DirectUploadService {
             if (onFileProgress) {
               onFileProgress(file.id, progress, file.fileName);
             }
-          });
+          }, areaCode);  // Pass areaCode to each file upload
 
           console.log(`[DirectUpload] Success: ${file.fileName}`);
           return { success: true, file, result };

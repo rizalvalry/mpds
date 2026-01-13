@@ -7,13 +7,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  * NO ENVIRONMENT VARIABLES - all endpoints hardcoded for APK build
  */
 
-const DEV_BASE_URL = 'rnd-dev.bsi.co.id';
 const PROD_BASE_URL = 'droneark.bsi.co.id';
 
 export class ApiService {
   constructor(useProd = true) {
-    this.baseUrl = useProd ? PROD_BASE_URL : DEV_BASE_URL;
-    this.basePath = useProd ? '/api' : '/drone';
+    this.baseUrl = PROD_BASE_URL;
+    this.basePath = '/api';
     this.accessToken = null;
     this.refreshToken = null;
 
@@ -114,8 +113,8 @@ export class ApiService {
         const lowerText = responseText.toLowerCase();
         const looksLikeHtml = responseText.includes('<html') || responseText.includes('<!DOCTYPE');
         const hintsSessionMessage = (lowerText.includes('invalid') && lowerText.includes('session')) ||
-                                     (lowerText.includes('expired') && lowerText.includes('session')) ||
-                                     lowerText.includes('unauthorized');
+          (lowerText.includes('expired') && lowerText.includes('session')) ||
+          lowerText.includes('unauthorized');
 
         // Generate user-friendly error message based on status code
         let userMessage = 'Invalid response from server';
@@ -275,12 +274,12 @@ export class ApiService {
       // Store full login response for accessing userId later (needed for chunked upload)
       await AsyncStorage.setItem('login_response', JSON.stringify(data));
 
-      // Store operator_id for filtering cases
-      if (data.operator_id) {
-        await AsyncStorage.setItem('operator_id', data.operator_id.toString());
-        console.log(`[API] Login response stored, user_id: ${data.user_id}, operator_id: ${data.operator_id}`);
+      // Store user_id as area_id for filtering cases (filters[areaId] in API)
+      if (data.user_id) {
+        await AsyncStorage.setItem('area_id', data.user_id.toString());
+        console.log(`[API] Login successful - user_id: ${data.user_id} stored as area_id for filtering`);
       } else {
-        console.log(`[API] Login response stored, user_id: ${data.user_id}`);
+        console.warn(`[API] Login response missing user_id!`);
       }
 
       // Store upload_method and max_images_per_batch for dynamic upload configuration
@@ -320,7 +319,7 @@ export class ApiService {
     } finally {
       this.accessToken = null;
       this.refreshToken = null;
-      // Clear ALL session-related keys including operator_id, upload_method, and max_images_per_batch
+      // Clear ALL session-related keys including area_id, upload_method, and max_images_per_batch
       await AsyncStorage.multiRemove([
         'access_token',
         'refresh_token',
@@ -328,7 +327,7 @@ export class ApiService {
         'session_data',
         'logged_in_time',
         'login_response',
-        'operator_id',
+        'area_id',
         'upload_method',
         'max_images_per_batch'
       ]);
@@ -336,31 +335,7 @@ export class ApiService {
     }
   }
 
-  // Case Management APIs - exact match with Flutter main_api.dart
-  async getCaseList({ pageSize = 10, page = 1, filterAreaCode = null } = {}) {
-    await this.init(); // Ensure tokens are loaded
-    const query = {
-      'paging[limit]': pageSize.toString(),
-      'paging[page]': page.toString(),
-      'orders[area]': 'asc',
-    };
-
-    if (filterAreaCode) {
-      query['filters[areaCode]'] = filterAreaCode;
-    }
-
-    // Add operator_id filter from AsyncStorage
-    const operatorId = await AsyncStorage.getItem('operator_id');
-    if (operatorId) {
-      query['filters[areaId]'] = operatorId;
-      console.log(`[API] getCaseList: Filtering by operator_id (areaId): ${operatorId}`);
-    } else {
-      console.log('[API] getCaseList: No operator_id found, fetching all cases');
-    }
-
-    const url = this.buildUrl(this.endpoints.caseList, query);
-    return this.fetchData({ method: 'GET', url });
-  }
+  // Case Management APIs - removed duplicate, using comprehensive version below
 
   async assignWorker(caseId, workerId) {
     const url = this.buildUrl(this.endpoints.assignWorker);
@@ -389,12 +364,51 @@ export class ApiService {
     });
   }
 
+  async bulkUpdateCases(workerId, areaCode, statusId) {
+    const url = this.buildUrl(this.endpoints.bulkUpdate);
+
+    // Backend only supports single areaCode - do NOT join multiple codes
+    // If array is passed, only use first element (caller should loop for multiple)
+    const singleAreaCode = Array.isArray(areaCode) ? areaCode[0] : areaCode;
+
+    console.log('[API] bulkUpdateCases - Sending:', { assignTo: workerId, areaCode: singleAreaCode, statusId });
+
+    return this.fetchData({
+      method: 'POST',
+      url,
+      body: {
+        assignTo: workerId,
+        areaCode: singleAreaCode,
+        statusId: statusId
+      },
+    });
+  }
+
+  async bulkCancelation(areaCode, statusId = 1) {
+    const url = this.buildUrl(this.endpoints.bulkUpdate);
+
+    console.log('[API] bulkCancelation - Sending:', { areaCode, statusId });
+
+    return this.fetchData({
+      method: 'POST',
+      url,
+      body: {
+        areaCode: areaCode,
+        statusId: statusId
+      },
+    });
+  }
+
   async generateReport(areaCode = null) {
+    // Match Flutter implementation - only send areaCode if provided
+    // Backend /cases/case/report endpoint expects ONLY areaCode (optional)
     const body = {};
+
     if (areaCode && areaCode !== '') {
       body.areaCode = areaCode;
     }
 
+    console.log('[API] generateReport - Sending body:', body);
     const url = this.buildUrl(this.endpoints.generateReport);
     return this.fetchData({ method: 'POST', url, body });
   }
@@ -455,10 +469,92 @@ export class ApiService {
     return this.fetchData({ method: 'GET', url });
   }
 
-  // Dashboard APIs - exact match with Flutter main_api.dart
-  async getDashboardData(type) {
+  async validateArea(latitude, longitude) {
     await this.init(); // Ensure tokens are loaded
-    const url = this.buildUrl(this.endpoints.dashboardData, { type });
+    const url = this.buildUrl('/cases/area/validate', { lat: latitude, long: longitude });
+    return this.fetchData({ method: 'GET', url });
+  }
+
+  /**
+   * Validate area from image file (backend extracts GPS from EXIF)
+   * @param {string} imageUri - Local file URI
+   * @param {string} expectedAreaBlock - Expected area block code (optional)
+   * @returns {Promise<Object>} Area validation result
+   */
+  async validateAreaFromImage(imageUri, expectedAreaBlock = null) {
+    await this.init();
+
+    console.log('[ApiService] Validating area from image:', {
+      imageUri,
+      expectedAreaBlock,
+    });
+
+    // Create FormData for multipart/form-data request
+    const formData = new FormData();
+
+    // Add image file
+    const filename = imageUri.split('/').pop();
+    const match = /\.(\w+)$/.exec(filename);
+    const type = match ? `image/${match[1]}` : 'image/jpeg';
+
+    console.log('[ApiService] Image details:', { filename, type });
+
+    formData.append('image', {
+      uri: imageUri,
+      name: filename,
+      type: type,
+    });
+
+    // Add expected area block if provided
+    if (expectedAreaBlock) {
+      formData.append('expectedAreaBlock', expectedAreaBlock);
+    }
+
+    // FIX: Correct endpoint path (was /cases/area/validate/image)
+    const url = this.buildUrl('/area/validate/image');
+
+    console.log('[ApiService] Request URL:', url);
+
+    // PUBLIC ENDPOINT - No authentication required for GPS validation
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        // Don't set Content-Type - let browser set it with boundary
+        // 'Content-Type': 'multipart/form-data' is auto-added by fetch with boundary
+      },
+      body: formData,
+    });
+
+    console.log('[ApiService] Response status:', response.status);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[ApiService] Validation error:', {
+        status: response.status,
+        statusText: response.statusText,
+        error: errorText,
+      });
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('[ApiService] Validation result:', result);
+
+    return result;
+  }
+
+  // Dashboard APIs - exact match with Flutter main_api.dart
+  async getDashboardData(type, startDate = null, endDate = null) {
+    await this.init(); // Ensure tokens are loaded
+
+    // For month filter, add startDate and endDate parameters
+    const params = { type };
+    if (type === 'month' && startDate && endDate) {
+      params.startDate = startDate;
+      params.endDate = endDate;
+    }
+
+    const url = this.buildUrl(this.endpoints.dashboardData, params);
     return this.fetchData({ method: 'GET', url });
   }
 
@@ -480,46 +576,294 @@ export class ApiService {
     return this.fetchData({ method: 'GET', url });
   }
 
-  async getDashboardBDPerBlock(type) {
+  async getDashboardBDPerBlock(type, areaCodes = null) {
     await this.init(); // Ensure tokens are loaded
-    const url = this.buildUrl(this.endpoints.dashboardBDPerBlock, { type });
+
+    // Fetch ALL data without filtering - client will filter locally
+    const url = this.buildUrl(`${this.endpoints.dashboardBDPerBlock}?type=${type}`);
+
+    console.log(`[ApiService] 📊 getDashboardBDPerBlock URL: ${url} (fetch all, filter client-side)`);
     return this.fetchData({ method: 'GET', url });
   }
 
-  async exportDashboard(type) {
+  async exportDashboard(type, areaCodes = null, pilotName = null) {
     const url = this.buildUrl(this.endpoints.exportDashboard);
+    const body = { type };
+
+    // Add areaCodes filter for pilot-specific export
+    if (areaCodes && Array.isArray(areaCodes) && areaCodes.length > 0) {
+      body.AreaCodes = areaCodes;
+    }
+
+    // Add pilot name for PDF title
+    if (pilotName) {
+      body.PilotName = pilotName;
+    }
+
+    console.log('[ApiService] 📄 exportDashboard body:', body);
+
     return this.fetchData({
       method: 'POST',
       url,
-      body: { type },
+      body,
     });
   }
 
-  async getWeather(latitude, longitude) {
-    const url = this.buildUrl(this.endpoints.weather, { latitude, longitude });
+  async uploadDetails(data) {
+    await this.init(); // Ensure tokens are loaded
+    const url = 'https://droneark.bsi.co.id/services/cases/api/UploadDetails';
+
+    console.log('[ApiService] 📤 Calling UploadDetails API:', { url, data });
+
     return this.fetchData({
-      method: 'GET',
+      method: 'POST',
       url,
-      includeAuth: false,
+      body: data,
     });
+  }
+
+  /**
+   * ✅ NEW: Update detection counts (detected/undetected) via PATCH endpoint
+   * Used by Frontend-as-Bridge pattern to sync detected counts from Bird Drop API
+   * 
+   * @param {string} areaCode - Block area code (e.g., 'A', 'H')
+   * @param {number} totalDetected - Total detected count from Bird Drop API
+   * @param {string} operator - Optional operator/drone code from session (e.g., 'Drone-001')
+   * @param {number} totalUndetected - Optional undetected count (usually from worker)
+   */
+  async updateDetectionCounts(areaCode, totalDetected, operator = null, totalUndetected = null) {
+    await this.init();
+    const url = 'https://droneark.bsi.co.id/services/cases/api/UploadDetails/detection';
+
+    const body = {
+      area_code: areaCode,
+      total_detected: totalDetected,
+    };
+
+    // Include operator if provided (for proper backend query)
+    if (operator) {
+      body.operator = operator;
+    }
+
+    if (totalUndetected !== null) {
+      body.total_undetected = totalUndetected;
+    }
+
+    console.log('[ApiService] 🔄 Sync detection counts:', { url, body });
+
+    return this.fetchData({
+      method: 'PATCH',
+      url,
+      body,
+    });
+  }
+
+
+  // NOTE: getUploadDetails is defined later in this file (around line 1051)
+  // with client-side date filtering workaround for backend compatibility
+
+  async getWeather(latitude, longitude) {
+    try {
+      // Use Open-Meteo API for accurate real-time weather with hourly forecast
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,rain,weather_code&hourly=temperature_2m,weather_code&timezone=Asia/Jakarta&forecast_days=1`;
+
+      console.log('[ApiService] 🌤️ Fetching Open-Meteo data:', {
+        lat: latitude,
+        lon: longitude,
+        url: url,
+      });
+
+      const response = await fetch(url);
+      const data = await response.json();
+
+      console.log('[ApiService] 🌤️ Open-Meteo response:', data);
+
+      if (response.ok && data.current) {
+        // Map WMO weather codes to condition descriptions
+        const getWeatherCondition = (code) => {
+          if (code === 0) return { main: 'Clear', description: 'Cerah' };
+          if (code === 1 || code === 2) return { main: 'Clouds', description: 'Berawan Sebagian' };
+          if (code === 3) return { main: 'Clouds', description: 'Berawan' };
+          if (code === 45 || code === 48) return { main: 'Fog', description: 'Berkabut' };
+          if (code === 51 || code === 53 || code === 55) return { main: 'Drizzle', description: 'Gerimis' };
+          if (code === 61 || code === 63 || code === 65) return { main: 'Rain', description: 'Hujan' };
+          if (code === 71 || code === 73 || code === 75) return { main: 'Snow', description: 'Salju' };
+          if (code === 80 || code === 81 || code === 82) return { main: 'Rain', description: 'Hujan Deras' };
+          if (code === 95 || code === 96 || code === 99) return { main: 'Thunderstorm', description: 'Petir' };
+          return { main: 'Unknown', description: 'Tidak Diketahui' };
+        };
+
+        const currentCondition = getWeatherCondition(data.current.weather_code);
+
+        // Extract forecast for 3 periods based on Indonesian time division:
+        // Pagi: 00:00 - 10:00 (representative hour: 08:00)
+        // Siang: 10:00 - 15:00 (representative hour: 12:00)
+        // Sore: 15:00 - 18:00 (representative hour: 16:00)
+        const hourlyTime = data.hourly?.time || [];
+        const hourlyTemp = data.hourly?.temperature_2m || [];
+        const hourlyCode = data.hourly?.weather_code || [];
+
+        const getForecastForHour = (targetHour) => {
+          const today = new Date();
+          const targetTime = new Date(today);
+          targetTime.setHours(targetHour, 0, 0, 0);
+
+          // Find closest hour in forecast data
+          const targetISO = targetTime.toISOString().split('T')[0] + `T${targetHour.toString().padStart(2, '0')}:00`;
+          const index = hourlyTime.findIndex(t => t.startsWith(targetISO.substring(0, 13)));
+
+          if (index !== -1) {
+            const temp = Math.round(hourlyTemp[index]);
+            let condition = getWeatherCondition(hourlyCode[index]);
+
+            // Override: if temperature < 30°C, force cloudy/rainy weather
+            if (temp < 30) {
+              if (temp < 25) {
+                condition = { main: 'Rain', description: 'Hujan' };
+              } else {
+                condition = { main: 'Clouds', description: 'Berawan' };
+              }
+            }
+
+            return {
+              temperature: temp,
+              weatherCode: hourlyCode[index],
+              condition: condition,
+            };
+          }
+          return null;
+        };
+
+        const morning = getForecastForHour(8);   // 08:00 - Pagi (00:00-10:00)
+        const afternoon = getForecastForHour(12); // 12:00 - Siang (10:00-15:00)
+        const evening = getForecastForHour(16);   // 16:00 - Sore (15:00-18:00)
+
+        // Apply temperature-based weather override for current weather too
+        let finalCurrentCondition = currentCondition;
+        const currentTemp = data.current.temperature_2m;
+        if (currentTemp < 30) {
+          if (currentTemp < 25) {
+            finalCurrentCondition = { main: 'Rain', description: 'Hujan' };
+          } else {
+            finalCurrentCondition = { main: 'Clouds', description: 'Berawan' };
+          }
+        }
+
+        return {
+          success: true,
+          data: {
+            temperature: currentTemp,
+            condition: finalCurrentCondition.description,
+            main: finalCurrentCondition.main,
+            humidity: data.current.relative_humidity_2m,
+            rain: data.current.rain,
+            weatherCode: data.current.weather_code,
+            // 3-period forecast - only from API, no assumptions
+            forecast: {
+              morning: morning ? {
+                temperature: morning.temperature,
+                condition: morning.condition.description,
+                main: morning.condition.main,
+                weatherCode: morning.weatherCode,
+              } : null,
+              afternoon: afternoon ? {
+                temperature: afternoon.temperature,
+                condition: afternoon.condition.description,
+                main: afternoon.condition.main,
+                weatherCode: afternoon.weatherCode,
+              } : null,
+              evening: evening ? {
+                temperature: evening.temperature,
+                condition: evening.condition.description,
+                main: evening.condition.main,
+                weatherCode: evening.weatherCode,
+              } : null,
+            },
+          },
+        };
+      } else {
+        console.error('[ApiService] ❌ Open-Meteo error:', data);
+        return {
+          success: false,
+          error: data.reason || 'Failed to fetch weather data',
+        };
+      }
+    } catch (error) {
+      console.error('[ApiService] ❌ Weather API error:', error);
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
   }
 
   // Case List APIs - exact match with Flutter main_api.dart
-  async getCaseList({ pageSize = 10, page = 1, filterAreaCode = null }) {
+  async getCaseList({
+    pageSize = 100,
+    page = 1,
+    filterAreaCode = null,
+    filterIsConfirmed = null,
+    filterStatusIds = null,
+    adminAreaId = null,
+  } = {}) {
+    await this.init(); // Ensure tokens are loaded
+
+    // Get today's date in YYYY-MM-DD format for filtering
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0]; // Format: 2025-11-21
+
     const query = {
       'paging[limit]': pageSize.toString(),
       'paging[page]': page.toString(),
-      'orders[area]': 'asc',
+      'orders[area]': 'desc', // Order by area descending
+      'orders[date]': 'desc', // Order by date descending (newest first)
+      'filters[date]': todayStr, // Filter only today's cases
     };
 
+    // CRITICAL: filters[areaId] MUST ALWAYS be present (from user_id at login)
+    // This is the user's ID that backend uses to get accessible area_codes from users table
+    const areaId = await AsyncStorage.getItem('area_id');
+    if (adminAreaId) {
+      // Use explicit admin area ID if provided
+      query['filters[areaId]'] = adminAreaId.toString();
+      console.log(`[API] getCaseList: Using explicit adminAreaId: ${adminAreaId}`);
+    } else if (areaId) {
+      // Use user_id from login as areaId (this is ALWAYS required)
+      query['filters[areaId]'] = areaId;
+      console.log(`[API] getCaseList: Using user_id as areaId from session: ${areaId}`);
+    } else {
+      console.error(`[API] getCaseList: ERROR - No area_id found in session! User must login again.`);
+    }
+
+    // Add specific area code filter if provided (for filtering to specific area like "L")
+    // This is OPTIONAL and works together with filters[areaId]
     if (filterAreaCode) {
       query['filters[areaCode]'] = filterAreaCode;
+      console.log(`[API] getCaseList: Filtering by specific areaCode: ${filterAreaCode}`);
+    } else {
+      console.log(`[API] getCaseList: Showing all areas accessible by user (no specific areaCode filter)`);
+    }
+
+    // Add isConfirmed filter if provided (true/false)
+    if (filterIsConfirmed !== null && filterIsConfirmed !== undefined) {
+      query['filters[isConfirmed]'] = filterIsConfirmed.toString();
+    }
+
+    // Add statusIds filter if provided (comma-separated IDs or single ID)
+    if (filterStatusIds) {
+      query['filters[statusIds]'] = filterStatusIds.toString();
     }
 
     const url = this.buildUrl(this.endpoints.caseList, query);
-    console.log('[API] getCaseList - Sending request to:', url);
-    console.log('[API] getCaseList - Has auth token:', !!this.accessToken);
-    console.log('[API] getCaseList - Filter areaCode:', filterAreaCode || 'none');
+    console.log('[API] getCaseList - Full URL:', url);
+    console.log('[API] getCaseList - All Filters:', {
+      date: todayStr, // Today's date filter
+      areaId: query['filters[areaId]'] || 'MISSING!',
+      areaCode: filterAreaCode || 'all areas',
+      isConfirmed: filterIsConfirmed !== null ? filterIsConfirmed : 'none',
+      statusIds: filterStatusIds || 'none',
+      orders: 'area=desc, date=desc',
+    });
 
     const response = await this.fetchData({ method: 'GET', url });
 
@@ -690,11 +1034,15 @@ export class ApiService {
    * GET Upload Details by date
    * @param {string} createdAt - Date in YYYY-MM-DD format
    * @returns {Promise<Object>} Upload details response
+   *
+   * WORKAROUND: Backend createdAt filter is broken, so we fetch all data
+   * and filter client-side by date
    */
   async getUploadDetails(createdAt) {
-    const url = `https://${this.baseUrl}/services${this.endpoints.uploadDetails}?createdAt=${createdAt}`;
+    // WORKAROUND: Fetch without date filter (backend filter is broken)
+    const url = `https://${this.baseUrl}/services${this.endpoints.uploadDetails}`;
 
-    console.log(`[API] GET ${url}`);
+    console.log(`[API] GET ${url} (filtering client-side for date: ${createdAt})`);
 
     try {
       const response = await fetch(url, {
@@ -703,12 +1051,23 @@ export class ApiService {
       });
 
       const data = await response.json();
-      console.log(`[API] Response:`, data);
+      console.log(`[API] Response (total records):`, data.data?.length || 0);
 
       if (data.success) {
+        // Client-side filter by date
+        const filteredData = (data.data || []).filter((item) => {
+          if (!item.created_at) return false;
+
+          // Extract date part from ISO timestamp (e.g., "2025-12-17T00:32:24.051108+07:00" -> "2025-12-17")
+          const itemDate = item.created_at.split('T')[0];
+          return itemDate === createdAt;
+        });
+
+        console.log(`[API] Filtered to ${filteredData.length} records for date ${createdAt}`);
+
         return {
           success: true,
-          data: data.data || [],
+          data: filteredData,
           message: data.message,
         };
       } else {
@@ -742,7 +1101,16 @@ export class ApiService {
     const url = `https://${this.baseUrl}/services${this.endpoints.uploadDetails}`;
 
     console.log(`[API] POST ${url}`);
-    console.log(`[API] Payload:`, uploadData);
+    console.log(`[API] Payload details:`, {
+      operator: uploadData.operator,
+      status: uploadData.status,
+      startUploads: uploadData.startUploads,
+      endUploads: uploadData.endUploads,
+      areaHandle: uploadData.areaHandle,
+      areaHandleType: Array.isArray(uploadData.areaHandle) ? 'array' : typeof uploadData.areaHandle,
+      areaHandleLength: Array.isArray(uploadData.areaHandle) ? uploadData.areaHandle.length : 'N/A',
+    });
+    console.log(`[API] Full Payload:`, JSON.stringify(uploadData, null, 2));
 
     try {
       const response = await fetch(url, {
@@ -752,12 +1120,19 @@ export class ApiService {
       });
 
       const data = await response.json();
-      console.log(`[API] Response:`, data);
+      console.log(`[API] Response status:`, response.status);
+      console.log(`[API] Response data:`, data);
+
+      // Log the created ID if successful
+      if (data.success && data.id) {
+        console.log(`[API] ✅ Upload session created with ID: ${data.id}`);
+      }
 
       if (response.ok && data.success) {
         return {
           success: true,
-          data: data.data || {},
+          data: data.data || data, // Include full response data
+          id: data.id, // Include the ID
           message: data.message || 'Upload session created successfully',
         };
       } else {
@@ -769,6 +1144,71 @@ export class ApiService {
       }
     } catch (error) {
       console.error(`[API] POST Upload Details error:`, error);
+      return {
+        success: false,
+        data: null,
+        message: error.message,
+      };
+    }
+  }
+
+  /**
+   * PUT Upload Details - Update progress (end_uploads)
+   *
+   * CRITICAL: Backend API MUST filter by operator + areaCode to update correct row
+   *
+   * @param {Object} updateData - Update data
+   * @param {string} updateData.operator - Operator name (drone_code) e.g., "Drone-001"
+   * @param {string} updateData.areaCode - Area block code e.g., "A", "B", "C"
+   * @param {string} updateData.status - Upload status ('active')
+   * @param {number} updateData.endUploads - Files completed so far (total_processed from Pusher)
+   * @param {number} updateData.phase - Phase number (default 0)
+   * @param {string} updateData.updatedAt - Timestamp of update
+   * @returns {Promise<Object>} Update response
+   *
+   * @example
+   * // Update Block M for Drone-002 with 105 files processed
+   * await updateUploadProgress({
+   *   operator: 'Drone-002',
+   *   areaCode: 'M',
+   *   status: 'active',
+   *   endUploads: 105,
+   *   phase: 0,
+   *   updatedAt: new Date().toISOString()
+   * });
+   */
+  async updateUploadProgress(updateData) {
+    const url = `https://${this.baseUrl}/services${this.endpoints.uploadDetails}`;
+
+    console.log(`[API] PUT ${url}`);
+    console.log(`[API] Update payload for Block ${updateData.areaCode || 'UNKNOWN'}:`, updateData);
+
+    try {
+      const response = await fetch(url, {
+        method: 'PUT',
+        headers: this.getHeaders(),
+        body: JSON.stringify(updateData),
+      });
+
+      const data = await response.json();
+      console.log(`[API] PUT Response status:`, response.status);
+      console.log(`[API] PUT Response data:`, data);
+
+      if (response.ok && data.success) {
+        return {
+          success: true,
+          data: data.data || data,
+          message: data.message || 'Progress updated successfully',
+        };
+      } else {
+        return {
+          success: false,
+          data: null,
+          message: data.message || 'Failed to update progress',
+        };
+      }
+    } catch (error) {
+      console.error(`[API] PUT Upload Details error:`, error);
       return {
         success: false,
         data: null,
