@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider } from './src/contexts/ThemeContext';
 import { UploadProvider } from './src/contexts/UploadContext';
 import GlobalUploadIndicator from './src/components/shared/GlobalUploadIndicator';
+import AnimatedSplashScreen from './src/components/shared/AnimatedSplashScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import ChooseDroneScreen from './src/screens/ChooseDroneScreen';
 import DashboardScreen from './src/screens/DashboardSimple';
@@ -132,6 +133,7 @@ function MainApp() {
         role_id: response.role_id,
         role: response.role,
         drone: response.drone,
+        area_code: response.area_code,  // CRITICAL: Include area_code for subfolder routing
         status: response.status,
         status_code: response.status_code,
         message: response.message
@@ -168,26 +170,33 @@ function MainApp() {
 
 export default function App() {
   const [isReady, setIsReady] = useState(false);
+  const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
 
   useEffect(() => {
     async function prepare() {
       try {
-        // Simulate loading resources
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Hide native splash screen immediately
+        await SplashScreen.hideAsync();
+        // Show animated splash for 3 seconds
+        await new Promise(resolve => setTimeout(resolve, 3000));
       } catch (e) {
         console.warn('Error during preparation:', e);
       } finally {
+        setShowAnimatedSplash(false);
         setIsReady(true);
-        // Hide splash screen after loading
-        await SplashScreen.hideAsync();
       }
     }
 
     prepare();
   }, []);
 
+  // Show animated splash screen with paper airplane
+  if (showAnimatedSplash) {
+    return <AnimatedSplashScreen />;
+  }
+
   if (!isReady) {
-    return null; // Show splash screen from app.json
+    return null;
   }
 
   return (
