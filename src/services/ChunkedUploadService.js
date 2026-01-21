@@ -46,8 +46,9 @@ export class ChunkedUploadService {
    * @param {function} onProgress - Progress callback
    * @param {string} uuid - UUID for organizing uploads (optional, required for development)
    * @param {string} userid - User ID (optional, required for development)
+   * @param {string} areaCode - Area code for subfolder routing (e.g., A, K, Y)
    */
-  async uploadChunk(chunkBlob, fileId, chunkIndex, totalChunks, originalName, onProgress, uuid = null, userid = null) {
+  async uploadChunk(chunkBlob, fileId, chunkIndex, totalChunks, originalName, onProgress, uuid = null, userid = null, areaCode = null) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
@@ -133,6 +134,11 @@ export class ChunkedUploadService {
         formData.append('userid', String(userid));
       }
 
+      // SUBFOLDER APPROACH: Send area_code for routing to input/{area_code}/ subfolder
+      if (areaCode) {
+        formData.append('area_code', String(areaCode).toUpperCase());
+      }
+
       xhr.open('POST', this.uploadUrl);
       // No Authorization header - backend doesn't validate it
       // Don't set Content-Type, let browser set it with boundary
@@ -146,6 +152,7 @@ export class ChunkedUploadService {
       console.log(`[ChunkUpload] total_chunks: ${totalChunks}`);
       console.log(`[ChunkUpload] uuid: ${uuid || 'not provided'}`);
       console.log(`[ChunkUpload] userid: ${userid || 'not provided'}`);
+      console.log(`[ChunkUpload] area_code: ${areaCode || 'not provided (default folder)'}`);
       console.log(`[ChunkUpload] ========================================`);
 
       xhr.send(formData);
@@ -157,8 +164,9 @@ export class ChunkedUploadService {
    * Uses /upload/file endpoint which directly uploads to Azure Blob Storage
    * @param {object} file - File object with uri, fileName, size, type
    * @param {function} onProgress - Progress callback (0-100)
+   * @param {string} areaCode - Area code for subfolder routing (e.g., A, K, Y)
    */
-  async uploadFileDirect(file, onProgress) {
+  async uploadFileDirect(file, onProgress, areaCode = null) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
@@ -203,11 +211,17 @@ export class ChunkedUploadService {
         name: file.fileName,
       });
 
+      // SUBFOLDER APPROACH: Add area_code to FormData for routing
+      if (areaCode) {
+        formData.append('area_code', String(areaCode).toUpperCase());
+      }
+
       console.log(`[DirectUpload] ========================================`);
       console.log(`[DirectUpload] Uploading file directly`);
       console.log(`[DirectUpload] URL: ${this.uploadUrl}`);
       console.log(`[DirectUpload] File: ${file.fileName}`);
       console.log(`[DirectUpload] Size: ${file.size || 'unknown'} bytes`);
+      console.log(`[DirectUpload] Area code: ${areaCode || 'not provided (default folder)'}`);
       console.log(`[DirectUpload] ========================================`);
 
       xhr.open('POST', this.uploadUrl);
@@ -222,15 +236,16 @@ export class ChunkedUploadService {
    * @param {function} onProgress - Progress callback (0-100)
    * @param {string} uuid - UUID for organizing uploads (optional, required for production chunking)
    * @param {string} userid - User ID (optional, required for production chunking)
+   * @param {string} areaCode - Area code for subfolder routing (e.g., A, K, Y)
    */
-  async uploadFileChunked(file, onProgress, uuid = null, userid = null) {
+  async uploadFileChunked(file, onProgress, uuid = null, userid = null, areaCode = null) {
     await this.init(); // Initialize
 
     // Use direct upload for development, chunking for production
     if (!this.useProd) {
       console.log(`[ChunkUpload] Using direct upload for development environment`);
       try {
-        const result = await this.uploadFileDirect(file, onProgress);
+        const result = await this.uploadFileDirect(file, onProgress, areaCode);
         return { success: true, fileName: file.fileName, result };
       } catch (error) {
         console.error(`[DirectUpload] Error uploading file:`, error);
@@ -254,6 +269,7 @@ export class ChunkedUploadService {
     console.log(`[ChunkUpload] Size: ${file.size || 'unknown'} bytes`);
     console.log(`[ChunkUpload] File ID: ${fileId}`);
     console.log(`[ChunkUpload] Total chunks: ${totalChunks}`);
+    console.log(`[ChunkUpload] Area code: ${areaCode || 'not provided (default folder)'}`);
     console.log(`[ChunkUpload] ========================================`);
 
     try {
@@ -269,8 +285,9 @@ export class ChunkedUploadService {
             onProgress(chunkProgress);
           }
         },
-        uuid,    // Pass uuid to uploadChunk
-        userid   // Pass userid to uploadChunk
+        uuid,      // Pass uuid to uploadChunk
+        userid,    // Pass userid to uploadChunk
+        areaCode   // Pass areaCode for subfolder routing
       );
 
       console.log(`[ChunkUpload] File ${file.fileName} uploaded successfully`);
@@ -290,8 +307,9 @@ export class ChunkedUploadService {
    * @param {function} onFileProgress - Per-file progress callback
    * @param {string} uuid - UUID for organizing uploads (only for production chunking)
    * @param {string} userid - User ID (only for production chunking)
+   * @param {string} areaCode - Area code for subfolder routing (e.g., A, K, Y)
    */
-  async uploadBatch(files, batchSize = 8, onBatchProgress, onFileProgress, uuid = null, userid = null) {
+  async uploadBatch(files, batchSize = 8, onBatchProgress, onFileProgress, uuid = null, userid = null, areaCode = null) {
     const results = [];
     const batches = [];
 
@@ -322,9 +340,16 @@ export class ChunkedUploadService {
         throw new Error('UUID and userid are required for production upload. Please ensure you are logged in.');
       }
 
-      console.log(`[ChunkUpload] Production mode - UUID: ${uuid}, UserID: ${userid}`);
+      console.log(`[ChunkUpload] Production mode - UUID: ${uuid}, UserID: ${userid}, AreaCode: ${areaCode || 'default'}`);
     } else {
       console.log(`[ChunkUpload] Development mode - Using direct upload (no uuid/userid required)`);
+    }
+
+    // Log subfolder routing
+    if (areaCode) {
+      console.log(`[ChunkUpload] 📂 Subfolder routing ENABLED: Files will be uploaded to input/${areaCode.toUpperCase()}/`);
+    } else {
+      console.log(`[ChunkUpload] 📂 Subfolder routing DISABLED: Files will be uploaded to default input/ folder`);
     }
 
     // Split files into batches
@@ -342,7 +367,7 @@ export class ChunkedUploadService {
           if (onFileProgress) {
             onFileProgress(files[0].id, progress, files[0].fileName);
           }
-        }, uuid, userid);  // Pass uuid and userid
+        }, uuid, userid, areaCode);  // Pass uuid, userid, and areaCode
         console.log(`[ChunkUpload] ✅ Test upload successful: ${files[0].fileName}`);
         results.push({ success: true, file: files[0], result: testResult });
       } catch (error) {
@@ -380,7 +405,7 @@ export class ChunkedUploadService {
             if (onFileProgress) {
               onFileProgress(file.id, progress, file.fileName);
             }
-          }, uuid, userid);  // Pass uuid and userid
+          }, uuid, userid, areaCode);  // Pass uuid, userid, and areaCode
 
           console.log(`[ChunkUpload] Success: ${file.fileName}`);
           return { success: true, file, result };

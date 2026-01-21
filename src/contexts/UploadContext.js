@@ -292,6 +292,15 @@ export const UploadProvider = ({ children }) => {
         console.warn(`[UploadContext] ⚠️ No session/drone data available, skipping upload details creation`);
       }
 
+      // SUBFOLDER APPROACH: Extract area_code for routing to input/{area_code}/ subfolder
+      // Get the first area code from session (mandatory selection from UploadMockup)
+      const areaCodesArray = session?.drone?.area_codes;
+      const areaCode = Array.isArray(areaCodesArray) && areaCodesArray.length > 0
+        ? areaCodesArray[0]  // Use first area code (e.g., "A", "K", "Y")
+        : (typeof areaCodesArray === 'string' ? areaCodesArray : null);
+
+      console.log(`[UploadContext] 📂 Subfolder approach - area_code: ${areaCode || 'not provided (default folder)'}`);
+
       const result = await chunkedUploadService.uploadBatch(
         images,
         BATCH_SIZE,
@@ -333,7 +342,10 @@ export const UploadProvider = ({ children }) => {
               }
             }
           }
-        }
+        },
+        null,     // uuid - will be auto-generated in ChunkedUploadService
+        null,     // userid - will be retrieved from AsyncStorage in ChunkedUploadService
+        areaCode  // SUBFOLDER APPROACH: Pass area_code for routing
       );
 
       // Mark all successful files as completed

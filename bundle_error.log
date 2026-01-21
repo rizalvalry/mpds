@@ -1,0 +1,10 @@
+
+⚠️ [2mreact-native[22m depends on @react-native-community/cli for cli commands. To fix update your [2mpackage.json[22m to include:
+
+[37m[1m
+  "devDependencies": {
+    "@react-native-community/cli": "latest",
+  }
+[22m[39m
+
+
