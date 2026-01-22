@@ -219,6 +219,9 @@ class MonitoringDataService {
           // Calculate progress for THIS area only
           const progress = startUploads > 0 ? Math.round((processed / startUploads) * 100) : 0;
 
+          // Check if detection is complete (backend signals completion via detection_completed_at)
+          const isDetectionComplete = session.detection_completed_at !== null && session.detection_completed_at !== undefined;
+
           const areaData = {
             areaCode,
             processed,
@@ -227,12 +230,15 @@ class MonitoringDataService {
             sessionId: session.id,
             operator: session.operator,
             createdAt: session.created_at,
+            detectionCompletedAt: session.detection_completed_at, // Track detection completion timestamp
             minutesOld: minutesDiff.toFixed(0),  // Changed from hoursOld to minutesOld
             autoCompleted: isAutoCompleted,
           };
 
-          // Move to completed if 100%
-          if (progress >= 100 || processed >= startUploads) {
+          // Move to completed if EITHER:
+          // 1. Backend explicitly set detection_completed_at (detection done)
+          // 2. OR progress >= 100% OR processed >= startUploads (complete by count)
+          if (isDetectionComplete || progress >= 100 || processed >= startUploads) {
             completed.push(areaData);
           } else {
             inProgress.push(areaData);

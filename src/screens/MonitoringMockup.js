@@ -493,18 +493,27 @@ export default function MonitoringMockup({
           progress: clampedProgress,
           operator: session.operator,
           sessionId: session.sessionId,
-          queued: Math.max(0, startUploads - processed), // Calculate queued items
+          // Calculate queued items - if detection_completed_at is set, queue is effectively 0
+          // (detection done even if counter has slight mismatch due to message loss)
+          queued: session.detectionCompletedAt ? 0 : Math.max(0, startUploads - processed),
           createdAt: session.createdAt, // Upload start time
           detectionStartedAt: session.detectionStartedAt, // Detection start time
           detectionCompletedAt: session.detectionCompletedAt, // Detection complete time
         };
 
         // Determine if completed or in progress
-        if (processed >= startUploads) {
-          // 100% complete (either naturally or auto-completed after 60 min)
+        // IMPORTANT: Use detection_completed_at as primary completion signal
+        // This handles cases where counter may have missed some messages but detection is actually done
+        const isDetectionComplete = session.detectionCompletedAt !== null && session.detectionCompletedAt !== undefined;
+        const isDataComplete = processed >= startUploads;
+
+        if (isDetectionComplete || isDataComplete) {
+          // Mark as complete if EITHER:
+          // 1. Backend explicitly set detection_completed_at (detection done, blob storage empty)
+          // 2. OR all uploads have been processed (100% complete by count)
           completed.push(blockData);
         } else {
-          // Still in progress
+          // Still in progress - detection not yet complete
           inProgress.push(blockData);
         }
       });
