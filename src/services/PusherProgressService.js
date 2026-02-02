@@ -141,13 +141,15 @@ class PusherProgressService {
 
         // CRITICAL: Prepare payload with area_code to update specific block
         // The API must filter by operator + area_code to update the correct row
+        // NOTE: updatedAt REMOVED - database trigger handles timestamp automatically
+        // Sending client timestamp caused timezone bugs (wrong timestamps)
         const payload = {
           operator,           // Drone-001 or Drone-002
           areaCode,          // Block A, B, C, etc.
           status: 'active',
           endUploads: progressInfo.total_processed,  // detected + undetected
           phase: 0,
-          updatedAt: new Date().toISOString(),
+          // updatedAt removed - let database handle it with trigger
         };
 
         console.log(`[PusherProgressService] 📤 Updating Block ${areaCode} (${minutesOld} min old): end_uploads=${progressInfo.total_processed}`);
