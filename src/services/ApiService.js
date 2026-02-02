@@ -658,9 +658,19 @@ export class ApiService {
     });
   }
 
+  // ✅ NEW: Fetch UploadDetails for IN PROGRESS panel (replaces Pusher)
+  async getUploadDetails(date) {
+    await this.init(); // Ensure tokens are loaded
+    // Matches exact URL format requested by user
+    const url = `https://droneark.bsi.co.id/services/cases/api/UploadDetails?createdAt=${date}`;
 
-  // NOTE: getUploadDetails is defined later in this file (around line 1051)
-  // with client-side date filtering workaround for backend compatibility
+    console.log('[ApiService] 📥 getUploadDetails:', url);
+
+    return this.fetchData({
+      method: 'GET',
+      url
+    });
+  }
 
   async getWeather(latitude, longitude) {
     try {
@@ -1156,6 +1166,7 @@ export class ApiService {
    * PUT Upload Details - Update progress (end_uploads)
    *
    * CRITICAL: Backend API MUST filter by operator + areaCode to update correct row
+   * NOTE: updatedAt is handled by database trigger - DO NOT send from frontend
    *
    * @param {Object} updateData - Update data
    * @param {string} updateData.operator - Operator name (drone_code) e.g., "Drone-001"
@@ -1163,7 +1174,6 @@ export class ApiService {
    * @param {string} updateData.status - Upload status ('active')
    * @param {number} updateData.endUploads - Files completed so far (total_processed from Pusher)
    * @param {number} updateData.phase - Phase number (default 0)
-   * @param {string} updateData.updatedAt - Timestamp of update
    * @returns {Promise<Object>} Update response
    *
    * @example
@@ -1173,8 +1183,8 @@ export class ApiService {
    *   areaCode: 'M',
    *   status: 'active',
    *   endUploads: 105,
-   *   phase: 0,
-   *   updatedAt: new Date().toISOString()
+   *   phase: 0
+   *   // NOTE: DO NOT send updatedAt - database handles it
    * });
    */
   async updateUploadProgress(updateData) {
