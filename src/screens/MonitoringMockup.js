@@ -325,6 +325,7 @@ export default function MonitoringMockup({
           const phase = uploadSession.phase || 0;
           const key = `${areaHandle}-${phase}`;
           const createdAt = uploadSession.created_at ? new Date(uploadSession.created_at) : null;
+          const updatedAt = uploadSession.updated_at ? new Date(uploadSession.updated_at) : null;
           const detectionStartedAt = uploadSession.detection_started_at ? new Date(uploadSession.detection_started_at) : null;
           const detectionCompletedAt = uploadSession.detection_completed_at ? new Date(uploadSession.detection_completed_at) : null;
 
@@ -346,6 +347,7 @@ export default function MonitoringMockup({
               totalDetected: 0,
               totalUndetected: 0,
               createdAt: createdAt, // Track upload start time
+              updatedAt: updatedAt, // Track upload finish time (last update)
               detectionStartedAt: detectionStartedAt, // Track when detection started
               detectionCompletedAt: detectionCompletedAt, // Track when detection completed
             };
@@ -359,6 +361,11 @@ export default function MonitoringMockup({
           // Track oldest created_at for this area-phase combination
           if (createdAt && (!uploadSessions[key].createdAt || createdAt < uploadSessions[key].createdAt)) {
             uploadSessions[key].createdAt = createdAt;
+          }
+
+          // Track latest updated_at for this area-phase combination (upload finish time)
+          if (updatedAt && (!uploadSessions[key].updatedAt || updatedAt > uploadSessions[key].updatedAt)) {
+            uploadSessions[key].updatedAt = updatedAt;
           }
 
           // Track detection timestamps (use the latest non-null values)
@@ -497,6 +504,7 @@ export default function MonitoringMockup({
           // (detection done even if counter has slight mismatch due to message loss)
           queued: session.detectionCompletedAt ? 0 : Math.max(0, startUploads - processed),
           createdAt: session.createdAt, // Upload start time
+          updatedAt: session.updatedAt, // Upload finish time (last update)
           detectionStartedAt: session.detectionStartedAt, // Detection start time
           detectionCompletedAt: session.detectionCompletedAt, // Detection complete time
         };
@@ -744,8 +752,24 @@ export default function MonitoringMockup({
                           </Text>
                         </View>
                       )}
-                      {/* Detection Timestamps */}
+                      {/* Upload & Detection Timestamps */}
                       <View style={styles.timestampContainer}>
+                        <View style={styles.timestampRow}>
+                          <Text style={styles.timestampLabel}>📤 Start Upload:</Text>
+                          <Text style={styles.timestampValue}>
+                            {area.createdAt
+                              ? area.createdAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                              : '-'}
+                          </Text>
+                        </View>
+                        <View style={styles.timestampRow}>
+                          <Text style={styles.timestampLabel}>📥 Finish Upload:</Text>
+                          <Text style={styles.timestampValue}>
+                            {area.updatedAt
+                              ? area.updatedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                              : 'In progress...'}
+                          </Text>
+                        </View>
                         <View style={styles.timestampRow}>
                           <Text style={styles.timestampLabel}>🚀 Start Detection:</Text>
                           <Text style={styles.timestampValue}>
@@ -822,6 +846,41 @@ export default function MonitoringMockup({
                         </Text>
                       </View>
                     )}
+                    {/* Upload & Detection Timestamps for COMPLETED panel */}
+                    <View style={styles.timestampContainer}>
+                      <View style={styles.timestampRow}>
+                        <Text style={styles.timestampLabel}>📤 Start Upload:</Text>
+                        <Text style={styles.timestampValue}>
+                          {area.createdAt
+                            ? area.createdAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                            : '-'}
+                        </Text>
+                      </View>
+                      <View style={styles.timestampRow}>
+                        <Text style={styles.timestampLabel}>📥 Finish Upload:</Text>
+                        <Text style={styles.timestampValue}>
+                          {area.updatedAt
+                            ? area.updatedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                            : '-'}
+                        </Text>
+                      </View>
+                      <View style={styles.timestampRow}>
+                        <Text style={styles.timestampLabel}>🚀 Start Detection:</Text>
+                        <Text style={styles.timestampValue}>
+                          {area.detectionStartedAt
+                            ? area.detectionStartedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                            : '-'}
+                        </Text>
+                      </View>
+                      <View style={styles.timestampRow}>
+                        <Text style={styles.timestampLabel}>✅ End Detection:</Text>
+                        <Text style={styles.timestampValue}>
+                          {area.detectionCompletedAt
+                            ? area.detectionCompletedAt.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                            : '-'}
+                        </Text>
+                      </View>
+                    </View>
                   </View>
                 ))
               )}

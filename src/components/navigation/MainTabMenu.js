@@ -32,16 +32,18 @@ export default function MainTabMenu({ activeMenu, onChangeMenu }) {
         horizontal
         decelerationRate={Platform.select({ ios: 0.95, android: 0.98 })}
         snapToAlignment="start"
-        snapToInterval={(width / 5)}
+        snapToInterval={(width / 4)}
         bounces={false}
-        contentInset={{ left: 16, right: TAB_HEIGHT * 0.25 }}
+        contentInset={{ left: 8, right: 16 }}
         contentOffset={{ x: 0, y: 0 }}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={[
           styles.row,
           {
-            minWidth: width,
-            paddingRight: TAB_HEIGHT * 0.5, // expose last tab
+            // Force content to be wider than screen to enable scrolling
+            // 6 items × ~(width/4.5) = wider than screen width
+            minWidth: width * 1.3,
+            paddingRight: 24, // space for last tab to be partially visible
           },
         ]}
       >
@@ -58,9 +60,10 @@ export default function MainTabMenu({ activeMenu, onChangeMenu }) {
                 {
                   backgroundColor: isActive ? '#0EA5E9' : 'transparent',
                   transform: [{ translateY: isActive ? -1.5 : 0 }],
-                  minWidth: width / 5 - 18,
+                  // Each tab takes ~1/4.5 of screen width - ensures 6 tabs won't fit
+                  minWidth: width / 4.5,
                   height: TAB_HEIGHT,
-                  marginRight: isLast ? -TAB_HEIGHT * 0.5 : 0,
+                  marginRight: isLast ? 0 : 0,
                 },
                 isActive ? styles.itemActive : styles.itemInactive,
               ]}
