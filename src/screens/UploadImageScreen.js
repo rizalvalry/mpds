@@ -339,26 +339,168 @@ export default function UploadImageScreen() {
             </View>
           )}
 
-          {/* File List */}
-          <ScrollView style={styles.fileList} contentContainerStyle={{ paddingBottom: 100 }}>
-            {uploadItems.map((item, index) => (
-              <FileItem
-                key={item.fileId}
-                item={item}
-                index={index}
-                progress={batchProgress[item.fileId] || 0}
-                uploading={uploading}
-                theme={theme}
-              />
-            ))}
-          </ScrollView>
+          {/* Batch Summary View - Much cleaner than showing all files */}
+          <BatchSummaryView
+            uploadItems={uploadItems}
+            batchProgress={batchProgress}
+            currentBatch={currentBatch}
+            totalBatches={totalBatches}
+            uploading={uploading}
+            uploadedCount={uploadedCount}
+            theme={theme}
+          />
         </>
       )}
     </View>
   );
 }
 
-// File Item Component
+// Batch Summary View Component - Shows batch overview instead of all files
+function BatchSummaryView({ uploadItems, batchProgress, currentBatch, totalBatches, uploading, uploadedCount, theme }) {
+  const [showDetails, setShowDetails] = useState(false);
+  const BATCH_SIZE = 5; // Should match upload batch size
+
+  // Calculate batch info
+  const totalFiles = uploadItems.length;
+  const calculatedBatches = Math.ceil(totalFiles / BATCH_SIZE);
+  const displayBatches = totalBatches > 0 ? totalBatches : calculatedBatches;
+
+  // Group files by batch
+  const batches = [];
+  for (let i = 0; i < totalFiles; i += BATCH_SIZE) {
+    const batchFiles = uploadItems.slice(i, i + BATCH_SIZE);
+    const batchIndex = Math.floor(i / BATCH_SIZE) + 1;
+    const isCurrentBatch = batchIndex === currentBatch;
+    const isCompleted = batchIndex < currentBatch;
+    const batchUploaded = batchFiles.filter(f => f.isUploaded).length;
+    const batchProgress = batchFiles.length > 0 ? (batchUploaded / batchFiles.length) * 100 : 0;
+
+    batches.push({
+      index: batchIndex,
+      files: batchFiles,
+      isCurrentBatch,
+      isCompleted,
+      uploadedCount: batchUploaded,
+      totalCount: batchFiles.length,
+      progress: batchProgress,
+    });
+  }
+
+  return (
+    <ScrollView style={styles.fileList} contentContainerStyle={{ paddingBottom: 20 }}>
+      {/* Batch Overview Cards */}
+      <View style={styles.batchOverview}>
+        <Text style={[styles.batchOverviewTitle, { color: theme.text }]}>
+          📦 Batch Overview ({displayBatches} batches)
+        </Text>
+
+        {/* Batch Progress Grid */}
+        <View style={styles.batchGrid}>
+          {batches.map((batch) => (
+            <View
+              key={batch.index}
+              style={[
+                styles.batchCard,
+                {
+                  backgroundColor: batch.isCompleted
+                    ? '#4CAF50'
+                    : batch.isCurrentBatch
+                    ? theme.primary
+                    : theme.card,
+                  borderColor: batch.isCurrentBatch ? theme.primary : theme.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.batchCardNumber,
+                  { color: batch.isCompleted || batch.isCurrentBatch ? '#fff' : theme.text },
+                ]}
+              >
+                {batch.index}
+              </Text>
+              {batch.isCompleted && <Text style={styles.batchCardIcon}>✓</Text>}
+              {batch.isCurrentBatch && uploading && (
+                <ActivityIndicator size="small" color="#fff" style={styles.batchCardSpinner} />
+              )}
+            </View>
+          ))}
+        </View>
+
+        {/* Current Batch Detail */}
+        {uploading && currentBatch > 0 && batches[currentBatch - 1] && (
+          <View style={[styles.currentBatchDetail, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Text style={[styles.currentBatchTitle, { color: theme.primary }]}>
+              🔄 Uploading Batch {currentBatch} of {displayBatches}
+            </Text>
+            <View style={styles.currentBatchFiles}>
+              {batches[currentBatch - 1].files.map((file, idx) => (
+                <View key={file.fileId} style={styles.currentBatchFileRow}>
+                  <Text style={[styles.currentBatchFileName, { color: theme.text }]} numberOfLines={1}>
+                    {idx + 1}. {file.fileName}
+                  </Text>
+                  <Text style={{ fontSize: 16 }}>
+                    {file.isUploaded ? '✅' : file.isUploading ? '⏳' : '⏸️'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Upload Stats */}
+        <View style={[styles.uploadStats, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: theme.primary }]}>{totalFiles}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Total Files</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: '#4CAF50' }]}>{uploadedCount}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Uploaded</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Text style={[styles.statValue, { color: theme.text }]}>{totalFiles - uploadedCount}</Text>
+            <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Pending</Text>
+          </View>
+        </View>
+
+        {/* Toggle to show all files (collapsed by default) */}
+        <TouchableOpacity
+          style={[styles.toggleDetailsButton, { borderColor: theme.border }]}
+          onPress={() => setShowDetails(!showDetails)}
+        >
+          <Text style={[styles.toggleDetailsText, { color: theme.textSecondary }]}>
+            {showDetails ? '▼ Hide file details' : '▶ Show all files ({totalFiles})'.replace('{totalFiles}', totalFiles)}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Expandable file list (collapsed by default) */}
+        {showDetails && (
+          <View style={styles.detailFileList}>
+            {uploadItems.map((item, index) => (
+              <View
+                key={item.fileId}
+                style={[styles.detailFileItem, { borderBottomColor: theme.border }]}
+              >
+                <Text style={[styles.detailFileIndex, { color: theme.textSecondary }]}>
+                  {index + 1}
+                </Text>
+                <Text style={[styles.detailFileName, { color: theme.text }]} numberOfLines={1}>
+                  {item.fileName}
+                </Text>
+                <Text style={{ fontSize: 14 }}>
+                  {item.isUploaded ? '✅' : item.hasError ? '❌' : '⏸️'}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    </ScrollView>
+  );
+}
+
+// File Item Component (kept for compatibility but not used in main view)
 function FileItem({ item, index, progress, uploading, theme }) {
   const getStatusIcon = () => {
     if (item.isUploaded) return '✅';
@@ -594,5 +736,115 @@ const styles = StyleSheet.create({
   },
   processingBarFill: {
     height: '100%',
+  },
+  // Batch Summary View styles
+  batchOverview: {
+    flex: 1,
+  },
+  batchOverviewTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  batchGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  batchCard: {
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  batchCardNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  batchCardIcon: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    fontSize: 10,
+    color: '#fff',
+  },
+  batchCardSpinner: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+  },
+  currentBatchDetail: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 16,
+  },
+  currentBatchTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  currentBatchFiles: {
+    gap: 6,
+  },
+  currentBatchFileRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  currentBatchFileName: {
+    flex: 1,
+    fontSize: 13,
+    marginRight: 8,
+  },
+  uploadStats: {
+    flexDirection: 'row',
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 16,
+    marginBottom: 16,
+    justifyContent: 'space-around',
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  statLabel: {
+    fontSize: 12,
+    marginTop: 4,
+  },
+  toggleDetailsButton: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  toggleDetailsText: {
+    fontSize: 13,
+  },
+  detailFileList: {
+    marginTop: 8,
+  },
+  detailFileItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  detailFileIndex: {
+    width: 36,
+    fontSize: 12,
+  },
+  detailFileName: {
+    flex: 1,
+    fontSize: 12,
   },
 });
