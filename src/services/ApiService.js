@@ -296,9 +296,9 @@ export class ApiService {
         await AsyncStorage.setItem('max_images_per_batch', data.max_images_per_batch.toString());
         console.log(`[API] Max images per batch: ${data.max_images_per_batch}`);
       } else {
-        // Default to 8 if not specified
-        await AsyncStorage.setItem('max_images_per_batch', '8');
-        console.log(`[API] Max images per batch not specified, defaulting to: 8`);
+        // Default to 5 if not specified (matches database default in upload_control_config)
+        await AsyncStorage.setItem('max_images_per_batch', '5');
+        console.log(`[API] Max images per batch not specified, defaulting to: 5`);
       }
     }
 

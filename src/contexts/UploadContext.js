@@ -33,9 +33,31 @@ export const UploadProvider = ({ children }) => {
   const connectivityUnsubscribeRef = useRef(null);
   const pendingUploadRef = useRef(null); // Store pending upload state
 
-  const BATCH_SIZE = 5;
+  // Dynamic batch size from login response (max_images_per_batch)
+  // Default to 5 if not available (matches database default in upload_control_config)
+  const [batchSize, setBatchSize] = useState(5);
+
   const RETRY_INTERVAL = 5000; // 5 seconds (like Flutter)
   const PENDING_UPLOADS_KEY = '@pending_uploads';
+
+  // Load batch size from login response
+  useEffect(() => {
+    const loadBatchSize = async () => {
+      try {
+        const maxBatch = await AsyncStorage.getItem('max_images_per_batch');
+        if (maxBatch) {
+          const size = parseInt(maxBatch, 10);
+          setBatchSize(size);
+          console.log(`[UploadContext] Batch size loaded from login: ${size}`);
+        } else {
+          console.log(`[UploadContext] Using default batch size: 10`);
+        }
+      } catch (error) {
+        console.warn('[UploadContext] Error loading batch size:', error);
+      }
+    };
+    loadBatchSize();
+  }, []);
 
   // Setup connectivity listener (like Flutter's _setupConnectivityListener)
   useEffect(() => {
@@ -222,7 +244,7 @@ export const UploadProvider = ({ children }) => {
     setIsUploading(true);
     uploadAbortRef.current = false;
 
-    const totalBatchCount = Math.ceil(images.length / BATCH_SIZE);
+    const totalBatchCount = Math.ceil(images.length / batchSize);
     setTotalBatches(totalBatchCount);
     setCurrentBatch(0);
     setBatchProgress({});
@@ -303,7 +325,7 @@ export const UploadProvider = ({ children }) => {
 
       const result = await chunkedUploadService.uploadBatch(
         images,
-        BATCH_SIZE,
+        batchSize,
         (batchInfo) => {
           // Batch progress callback
           setCurrentBatch(batchInfo.currentBatch);
@@ -313,7 +335,7 @@ export const UploadProvider = ({ children }) => {
           // Per-file progress callback - aggregate to batch level
           const fileIndex = images.findIndex(img => img.id === fileId);
           if (fileIndex !== -1) {
-            const batchIndex = Math.floor(fileIndex / BATCH_SIZE);
+            const batchIndex = Math.floor(fileIndex / batchSize);
 
             // Update batch progress (average of files in batch)
             setBatchProgress(prev => ({
@@ -456,7 +478,7 @@ export const UploadProvider = ({ children }) => {
         clearUploadHistory,
         resumePendingUploads,
         clearPendingUploads,
-        BATCH_SIZE,
+        batchSize,
       }}
     >
       {children}

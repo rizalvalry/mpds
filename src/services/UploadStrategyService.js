@@ -24,7 +24,7 @@ class UploadStrategyService {
       const maxBatch = await AsyncStorage.getItem('max_images_per_batch');
 
       this.uploadMethod = uploadMethod || 'chunking'; // Default to chunking
-      this.maxImagesPerBatch = maxBatch ? parseInt(maxBatch, 10) : 8;
+      this.maxImagesPerBatch = maxBatch ? parseInt(maxBatch, 10) : 5; // Default to 5 (matches database)
 
       console.log('[UploadStrategy] Initialized with:');
       console.log(`[UploadStrategy] - Method: ${this.uploadMethod}`);

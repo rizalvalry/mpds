@@ -78,6 +78,10 @@ export default function UploadImageScreen() {
     setStatistics(stats);
   };
 
+  // State for processing progress
+  const [processingFiles, setProcessingFiles] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0 });
+
   // Pick images from gallery
   const pickImages = async () => {
     // Request permission
@@ -96,18 +100,45 @@ export default function UploadImageScreen() {
     if (result.canceled) return;
 
     const assets = result.assets || [];
-    const files = await Promise.all(
-      assets.map(async (asset) => {
-        const response = await fetch(asset.uri);
-        const blob = await response.blob();
-        const fileName = asset.fileName || asset.uri.split('/').pop() || `photo_${Date.now()}.jpg`;
-        return new File([blob], fileName, {
-          type: blob.type || 'image/jpeg',
-        });
-      })
-    );
 
-    await handleSelectedFiles(files);
+    // Show processing indicator for large selections
+    if (assets.length > 50) {
+      setProcessingFiles(true);
+      setProcessingProgress({ current: 0, total: assets.length });
+    }
+
+    // BATCH PROCESSING: Process files in small batches to prevent OOM crash
+    // Processing 300+ files at once causes ~1.2GB memory spike = crash
+    const BATCH_SIZE = 15;
+    const allFiles = [];
+
+    for (let i = 0; i < assets.length; i += BATCH_SIZE) {
+      const batch = assets.slice(i, i + BATCH_SIZE);
+
+      // Process batch sequentially to reduce memory pressure
+      for (const asset of batch) {
+        try {
+          const response = await fetch(asset.uri);
+          const blob = await response.blob();
+          const fileName = asset.fileName || asset.uri.split('/').pop() || `photo_${Date.now()}.jpg`;
+          const file = new File([blob], fileName, {
+            type: blob.type || 'image/jpeg',
+          });
+          allFiles.push(file);
+
+          // Update progress
+          setProcessingProgress({ current: allFiles.length, total: assets.length });
+        } catch (error) {
+          console.warn(`Failed to process ${asset.fileName}: ${error.message}`);
+        }
+      }
+
+      // Allow garbage collection between batches
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    setProcessingFiles(false);
+    await handleSelectedFiles(allFiles);
   };
 
   // Handle selected files
@@ -178,6 +209,32 @@ export default function UploadImageScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
+      {/* Processing overlay for large file selections */}
+      {processingFiles && (
+        <View style={styles.processingOverlay}>
+          <View style={[styles.processingBox, { backgroundColor: theme.card }]}>
+            <ActivityIndicator size="large" color={theme.primary} />
+            <Text style={[styles.processingText, { color: theme.text }]}>
+              Processing files...
+            </Text>
+            <Text style={[styles.processingProgress, { color: theme.primary }]}>
+              {processingProgress.current} / {processingProgress.total}
+            </Text>
+            <View style={[styles.processingBar, { backgroundColor: theme.border }]}>
+              <View
+                style={[
+                  styles.processingBarFill,
+                  {
+                    width: `${(processingProgress.current / processingProgress.total) * 100}%`,
+                    backgroundColor: theme.primary,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+        </View>
+      )}
+
       {totalFiles === 0 ? (
         // Empty state - centered select button
         <View style={styles.centeredContainer}>
@@ -187,6 +244,7 @@ export default function UploadImageScreen() {
           <TouchableOpacity
             style={[styles.selectButton, { backgroundColor: theme.primary }]}
             onPress={pickImages}
+            disabled={processingFiles}
           >
             <Text style={styles.selectButtonText}>SELECT FILES</Text>
           </TouchableOpacity>
@@ -498,5 +556,43 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 11,
     marginTop: 4,
+  },
+  // Processing overlay styles
+  processingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  processingBox: {
+    padding: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    minWidth: 250,
+  },
+  processingText: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  processingProgress: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  processingBar: {
+    width: 200,
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  processingBarFill: {
+    height: '100%',
   },
 });

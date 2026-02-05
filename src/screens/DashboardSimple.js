@@ -125,7 +125,7 @@ export default function DashboardScreen({ session, setSession }) {
         const maxBatch = await AsyncStorage.getItem('max_images_per_batch');
 
         const method = uploadMethod || 'chunking';
-        const batchSize = maxBatch ? parseInt(maxBatch, 10) : 8;
+        const batchSize = maxBatch ? parseInt(maxBatch, 10) : 5; // Default 5 (matches database)
 
         let displayMethod = '';
         switch (method) {

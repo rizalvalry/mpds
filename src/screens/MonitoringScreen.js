@@ -248,16 +248,9 @@ export default function MonitoringScreen({ session, activeMenu, setActiveMenu, i
         totalDetected += (block.true_detection || 0) + (block.false_detection || 0);
       });
 
-      // SYNC DETECTED COUNTS TO BACKEND (Frontend-as-Bridge)
-      // Uses PATCH /UploadDetails/detection endpoint for proper update
-      birdDropsData.forEach(block => {
-        const blkDetected = (block.true_detection || 0) + (block.false_detection || 0);
-        if (block.area_code && blkDetected > 0) {
-          // Fire and forget - background sync using correct PATCH endpoint
-          apiService.updateDetectionCounts(block.area_code, blkDetected)
-            .catch(e => console.log(`[Monitoring] Sync failed for ${block.area_code}:`, e.message));
-        }
-      });
+      // NOTE: Monitoring is READ-ONLY - NO updates to UploadDetails
+      // UploadDetails updates are handled ONLY by backend upload process
+      // Detection counts are updated by worker/counter-consumer service
 
       // Calculate metrics from UploadDetails
       let totalUploaded = 0;
