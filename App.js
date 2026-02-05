@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { View, Alert, AppState } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -14,11 +14,122 @@ import DashboardScreen from './src/screens/DashboardSimple';
 // Keep splash screen visible while loading
 SplashScreen.preventAutoHideAsync();
 
+// Session timeout configuration (12 hours in milliseconds)
+const SESSION_TIMEOUT_HOURS = 12;
+const SESSION_CHECK_INTERVAL = 60000; // Check every 1 minute
+
 function MainApp() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loginResponse, setLoginResponse] = useState(null);
   const [currentScreen, setCurrentScreen] = useState('login'); // 'login', 'chooseDrone', 'dashboard'
+
+  const sessionCheckIntervalRef = useRef(null);
+  const appState = useRef(AppState.currentState);
+
+  // Check if session is expired based on expires_at
+  const isSessionExpired = useCallback((sessionData) => {
+    if (!sessionData?.expires_at) {
+      console.log('[Session] No expires_at found');
+      return false;
+    }
+
+    try {
+      // Parse expires_at (format: "2026-02-06 00:00:31.579")
+      const expiresAt = new Date(sessionData.expires_at.replace(' ', 'T'));
+      const now = new Date();
+
+      const isExpired = now >= expiresAt;
+      const remainingMs = expiresAt - now;
+      const remainingHours = Math.floor(remainingMs / (1000 * 60 * 60));
+      const remainingMinutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+
+      console.log(`[Session] Expires at: ${expiresAt.toISOString()}`);
+      console.log(`[Session] Current time: ${now.toISOString()}`);
+      console.log(`[Session] Remaining: ${remainingHours}h ${remainingMinutes}m`);
+      console.log(`[Session] Is expired: ${isExpired}`);
+
+      return isExpired;
+    } catch (error) {
+      console.error('[Session] Error parsing expires_at:', error);
+      return false;
+    }
+  }, []);
+
+  // Handle session expiry - show alert and logout
+  const handleSessionExpired = useCallback(async () => {
+    console.log('[Session] ⏰ Session expired! Kicking out to login...');
+
+    // Clear interval first
+    if (sessionCheckIntervalRef.current) {
+      clearInterval(sessionCheckIntervalRef.current);
+      sessionCheckIntervalRef.current = null;
+    }
+
+    // Show alert to user
+    Alert.alert(
+      'Session Expired',
+      'Your session has expired (12 hours). Please login again.',
+      [
+        {
+          text: 'OK',
+          onPress: async () => {
+            // Perform logout
+            await handleLogout();
+          }
+        }
+      ],
+      { cancelable: false }
+    );
+  }, []);
+
+  // Check session validity
+  const checkSessionValidity = useCallback(async () => {
+    try {
+      const sessionDataString = await AsyncStorage.getItem('session_data');
+      if (sessionDataString) {
+        const sessionData = JSON.parse(sessionDataString);
+        if (isSessionExpired(sessionData)) {
+          handleSessionExpired();
+        }
+      }
+    } catch (error) {
+      console.error('[Session] Error checking session validity:', error);
+    }
+  }, [isSessionExpired, handleSessionExpired]);
+
+  // Setup session expiry checker
+  useEffect(() => {
+    if (currentScreen === 'dashboard' && session) {
+      console.log('[Session] Starting session expiry checker...');
+
+      // Check immediately on mount
+      checkSessionValidity();
+
+      // Setup interval to check periodically
+      sessionCheckIntervalRef.current = setInterval(() => {
+        console.log('[Session] Periodic check...');
+        checkSessionValidity();
+      }, SESSION_CHECK_INTERVAL);
+
+      // Listen for app state changes (foreground/background)
+      const subscription = AppState.addEventListener('change', nextAppState => {
+        if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+          console.log('[Session] App came to foreground, checking session...');
+          checkSessionValidity();
+        }
+        appState.current = nextAppState;
+      });
+
+      return () => {
+        console.log('[Session] Cleaning up session checker...');
+        if (sessionCheckIntervalRef.current) {
+          clearInterval(sessionCheckIntervalRef.current);
+        }
+        subscription?.remove();
+      };
+    }
+  }, [currentScreen, session, checkSessionValidity]);
 
   // Handle logout and clear session
   const handleLogout = async () => {
